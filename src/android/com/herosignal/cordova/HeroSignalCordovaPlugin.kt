@@ -97,11 +97,6 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
 
     // --- Yaşam döngüsü ---
 
-    override fun onResume(multitasking: Boolean) {
-        super.onResume(multitasking)
-        core.checkPermission()
-    }
-
     override fun onReset() {
         // Sayfa yeniden yüklendi: eski JS kanalı geçersiz; yeni sayfa `setEventCallback` ile yeniden açar.
         synchronized(lock) { eventCallback = null }

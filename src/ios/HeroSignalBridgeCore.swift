@@ -59,7 +59,6 @@ final class HeroSignalBridgeCore: NSObject {
     private let emit: (String, [String: Any]) -> Void
     /// JS tarafında ön plan dinleyicisi varsa gösterim JS kararına bırakılır.
     var foregroundHandlerEnabled = false
-    private var lastPermission: Bool?
     private var foregroundSeq = 0
     private var pendingForeground: [String: HSForegroundEvent] = [:]
     private var pendingOrder: [String] = []
@@ -80,7 +79,6 @@ final class HeroSignalBridgeCore: NSObject {
 
     private func registerListeners() {
         Self.active = self
-        checkPermission()
         guard !Self.listenersRegistered else { return }
         Self.listenersRegistered = true
         HeroSignal.Notifications.addClickListener { e in
@@ -93,9 +91,12 @@ final class HeroSignalBridgeCore: NSObject {
         }
         HeroSignal.User.pushSubscription.addObserver { s in
             guard let core = Self.active else { return }
-            let state = Self.map(s)
-            core.emit("pushSubscriptionChange", state)
-            core.emitPermissionIfChanged(state["permission"] as? Bool ?? false)
+            core.emit("pushSubscriptionChange", Self.map(s))
+        }
+        // Yerel SDK izin gözlemcisi: izin isteği sonucu ve uygulama yeniden etkinleştiğinde (izin Ayarlar'dan
+        // değişmiş olabilir) etkin izin değiştiyse çağrılır.
+        HeroSignal.Notifications.addPermissionObserver { granted in
+            Self.active?.emit("permissionChange", ["permission": granted])
         }
         HeroSignal.InAppMessages.addClickListener { e in
             Self.active?.emit("inAppClick", ["message": ["id": e.messageId], "result": ["actionId": e.actionId, "url": Self.orNull(e.url)]])
@@ -127,23 +128,6 @@ final class HeroSignalBridgeCore: NSObject {
         defer { lock.unlock() }
         pendingOrder.removeAll { $0 == id }
         return pendingForeground.removeValue(forKey: id)
-    }
-
-    /// İzin sistem ayarlarından değişmiş olabilir (uygulama etkinleşince çağrılır).
-    func checkPermission() {
-        guard HeroSignal.isInitialized else { return }
-        Task {
-            let status = await HeroSignal.Notifications.permission()
-            DispatchQueue.main.async { self.emitPermissionIfChanged(Self.granted(status)) }
-        }
-    }
-
-    private func emitPermissionIfChanged(_ permission: Bool) {
-        lock.lock()
-        let changed = lastPermission != permission
-        lastPermission = permission
-        lock.unlock()
-        if changed { emit("permissionChange", ["permission": permission]) }
     }
 
     fileprivate func emitLifecycle(_ event: String, _ message: HSInAppMessage) {
@@ -221,11 +205,9 @@ final class HeroSignalBridgeCore: NSObject {
                 DispatchQueue.main.async { ok(["permission": Self.granted(status)]) }
             }
         case "requestPermission":
+            // İzin değiştiyse `permissionChange` olayını yerel SDK izin gözlemcisi gönderir.
             HeroSignal.Notifications.requestPermission { granted in
-                DispatchQueue.main.async {
-                    self.emitPermissionIfChanged(granted)
-                    ok(["permission": granted])
-                }
+                DispatchQueue.main.async { ok(["permission": granted]) }
             }
         case "clearAll": HeroSignal.Notifications.clearAll(); ok()
         // Tekil kaldırma Android tepsi kimliği ister; iOS'ta karşılığı olmadığından çağrı etkisiz tamamlanır (eski sağlayıcı ile aynı).

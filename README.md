@@ -51,6 +51,9 @@ HeroSignal.InAppMessages.addClickListener((e) => {});             // { message: 
 HeroSignal.InAppMessages.addLifecycleListener({ willDisplay() {}, didDismiss() {} });
 ```
 
+`addPermissionObserver` olayları yerel Android/iOS SDK izin gözlemcisinden gelir (izin isteği sonucu ve uygulama ön plana
+döndüğünde ayarlardan yapılan değişiklik; yalnızca gerçek değişiklikte).
+
 Her `add…` çağrısı aboneliği kaldıran bir fonksiyon döndürür. Olaylar native taraftan tek bir `keepCallback` kanalıyla gelir; kanal açılmadan oluşan olaylar (ör. soğuk başlatma tıklaması) native tarafta tamponlanır.
 
 ### In-app, bildirim kutusu ve diğerleri

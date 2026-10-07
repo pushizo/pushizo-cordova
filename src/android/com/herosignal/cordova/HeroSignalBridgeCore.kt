@@ -37,7 +37,6 @@ internal class HeroSignalBridgeCore(
     @Volatile var foregroundHandlerEnabled = false
 
     private val listenersRegistered = AtomicBoolean(false)
-    @Volatile private var lastPermission: Boolean? = null
     private val foregroundSeq = AtomicLong(0)
 
     /** Karar bekleyen ön plan bildirimleri; en eski kayıtlar düşürülür (sınırlı bellek). */
@@ -60,10 +59,13 @@ internal class HeroSignalBridgeCore(
         emit("foregroundWillDisplay", JSONObject().put("notificationId", id).put("pending", pending).put("notification", e.notification.toJson()))
     }
 
-    private val subscriptionObserver: (HsPushSubscriptionState) -> Unit = { s ->
-        emit("pushSubscriptionChange", s.toJson())
-        emitPermissionIfChanged(s.permission)
-    }
+    private val subscriptionObserver: (HsPushSubscriptionState) -> Unit = { s -> emit("pushSubscriptionChange", s.toJson()) }
+
+    /**
+     * Yerel SDK izin gözlemcisi: izin isteği sonucu ve uygulama ön plana döndüğünde (izin sistem ayarlarından
+     * değişmiş olabilir) etkin izin değiştiyse çağrılır.
+     */
+    private val permissionObserver: (Boolean) -> Unit = { granted -> emit("permissionChange", JSONObject().put("permission", granted)) }
 
     private val inAppClickListener: (HsInAppClickEvent) -> Unit = { e ->
         emit("inAppClick", JSONObject().put("message", JSONObject().put("id", e.messageId)).put("result", JSONObject().put("actionId", e.actionId).put("url", e.url.orNull())))
@@ -86,10 +88,10 @@ internal class HeroSignalBridgeCore(
     /** SDK dinleyicileri bir kez eklenir; soğuk başlatma tıklaması ilk tıklama dinleyicisine teslim edilir. */
     private fun registerListeners() {
         if (!listenersRegistered.compareAndSet(false, true)) return
-        lastPermission = HeroSignal.Notifications.permission
         HeroSignal.Notifications.addClickListener(clickListener)
         HeroSignal.Notifications.addForegroundLifecycleListener(foregroundListener)
         HeroSignal.User.pushSubscription.addObserver(subscriptionObserver)
+        HeroSignal.Notifications.addPermissionObserver(permissionObserver)
         HeroSignal.InAppMessages.addClickListener(inAppClickListener)
         HeroSignal.InAppMessages.addLifecycleListener(inAppLifecycleListener)
     }
@@ -99,6 +101,7 @@ internal class HeroSignalBridgeCore(
         HeroSignal.Notifications.removeClickListener(clickListener)
         HeroSignal.Notifications.removeForegroundLifecycleListener(foregroundListener)
         HeroSignal.User.pushSubscription.removeObserver(subscriptionObserver)
+        HeroSignal.Notifications.removePermissionObserver(permissionObserver)
         HeroSignal.InAppMessages.removeClickListener(inAppClickListener)
         HeroSignal.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
         // Bekleyen ön plan bildirimleri kaybolmasın diye gösterilir.
@@ -106,21 +109,9 @@ internal class HeroSignalBridgeCore(
         pending.forEach { it.display() }
     }
 
-    /** İzin sistem ayarlarından değişmiş olabilir (uygulama ön plana döndüğünde çağrılır). */
-    fun checkPermission() {
-        if (HeroSignal.isInitialized) emitPermissionIfChanged(HeroSignal.Notifications.permission)
-    }
-
-    /** İzin isteği sonuçlandı: SDK aboneliği günceller, değişim olayı gönderilir. */
+    /** İzin isteği sonuçlandı: SDK aboneliği günceller; izin değiştiyse yerel izin gözlemcisi olayı gönderir. */
     fun onPermissionResult() {
         HeroSignal.Notifications.onPermissionResult()
-        checkPermission()
-    }
-
-    private fun emitPermissionIfChanged(permission: Boolean) {
-        if (lastPermission == permission) return
-        lastPermission = permission
-        emit("permissionChange", JSONObject().put("permission", permission))
     }
 
     fun permissionJson(): JSONObject = JSONObject().put("permission", HeroSignal.Notifications.permission)

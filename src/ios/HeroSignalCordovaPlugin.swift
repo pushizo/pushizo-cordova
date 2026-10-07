@@ -25,7 +25,6 @@ class HeroSignalCordovaPlugin: CDVPlugin {
     private var core: HeroSignalBridgeCore!
     private var eventCallbackId: String?
     private var bufferedEvents: [[String: Any]] = []
-    private var observers: [NSObjectProtocol] = []
 
     override func pluginInitialize() {
         super.pluginInitialize()
@@ -38,21 +37,12 @@ class HeroSignalCordovaPlugin: CDVPlugin {
             config.initializeSdk()
         }
         core.attachIfInitialized()
-        observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.core.checkPermission()
-        })
     }
 
     override func onReset() {
         // Sayfa yeniden yüklendi: eski JS kanalı geçersiz; yeni sayfa `setEventCallback` ile yeniden açar.
         eventCallbackId = nil
         core.foregroundHandlerEnabled = false
-    }
-
-    override func dispose() {
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
-        observers.removeAll()
-        super.dispose()
     }
 
     // MARK: Olay kanalı
