@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HeroSignal Cordova eklentisi: native HeroSignal Android/iOS SDK'larını cordova.exec ile sarar. -->
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        id="cordova-plugin-herosignal"
+        version="0.1.0">
+    <name>HeroSignal</name>
+    <description>Push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (HeroSignal)</description>
+    <license>MIT</license>
+    <keywords>push,notifications,fcm,apns,in-app,inbox,herosignal</keywords>
+    <repo>https://github.com/herosignal/herosignal.git</repo>
+
+    <engines>
+        <engine name="cordova" version=">=12.0.0" />
+        <engine name="cordova-android" version=">=12.0.0" />
+        <engine name="cordova-ios" version=">=7.0.0" />
+    </engines>
+
+    <!-- JS katmanı (TypeScript kaynağı src/*.ts, `npm run build` ile www/ altına derlenir). -->
+    <js-module src="www/core.js" name="core" />
+    <js-module src="www/bridge.js" name="bridge" />
+    <js-module src="www/herosignal.js" name="HeroSignal">
+        <clobbers target="HeroSignal" />
+        <clobbers target="window.plugins.HeroSignal" />
+    </js-module>
+
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="HeroSignal">
+                <param name="android-package" value="com.herosignal.cordova.HeroSignalCordovaPlugin" />
+                <!-- Soğuk başlatma tıklamasının kaçmaması için eklenti uygulama açılışında yüklenir. -->
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <!--
+          POST_NOTIFICATIONS, INTERNET, FCM servisi (com.google.firebase.MESSAGING_EVENT) ve bildirim açma
+          Activity'si HeroSignal Android SDK (AAR) manifestinden Gradle manifest birleştirmesiyle eklenir.
+        -->
+        <config-file target="AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        </config-file>
+        <config-file target="AndroidManifest.xml" parent="/manifest/application">
+            <provider
+                android:name="com.herosignal.cordova.HeroSignalInitProvider"
+                android:authorities="${applicationId}.herosignal-cordova-init"
+                android:exported="false" />
+        </config-file>
+
+        <source-file src="src/android/com/herosignal/cordova/HeroSignalCordovaPlugin.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+        <source-file src="src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+        <source-file src="src/android/com/herosignal/cordova/HeroSignalConfigStore.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+        <source-file src="src/android/com/herosignal/cordova/HeroSignalInitProvider.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+
+        <framework src="src/android/herosignal.gradle" custom="true" type="gradleReference" />
+        <framework src="com.herosignal:herosignal-android:0.1.0" />
+    </platform>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="HeroSignal">
+                <param name="ios-package" value="HeroSignalCordovaPlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <!-- Arka plan (content-available) bildirimleri. -->
+        <config-file target="*-Info.plist" parent="UIBackgroundModes">
+            <array>
+                <string>remote-notification</string>
+            </array>
+        </config-file>
+
+        <!-- Push Notifications yeteneği (APNs ortamı derleme türüne göre). -->
+        <config-file target="*/Entitlements-Debug.plist" parent="aps-environment">
+            <string>development</string>
+        </config-file>
+        <config-file target="*/Entitlements-Release.plist" parent="aps-environment">
+            <string>production</string>
+        </config-file>
+
+        <source-file src="src/ios/HeroSignalCordovaPlugin.swift" />
+        <source-file src="src/ios/HeroSignalBridgeCore.swift" />
+        <source-file src="src/ios/HeroSignalAppDelegateHook.swift" />
+
+        <podspec>
+            <config>
+                <source url="https://cdn.cocoapods.org/" />
+            </config>
+            <pods use-frameworks="true">
+                <!-- Monorepo/yerel geliştirme: platforms/ios/Podfile içinde :path => '<repo>/sdk/ios' (README). -->
+                <pod name="HeroSignal" spec="~> 0.1.0" />
+            </pods>
+        </podspec>
+    </platform>
+</plugin>
