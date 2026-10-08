@@ -1,0 +1,51 @@
+{
+  "name": "cordova-plugin-herosignal",
+  "version": "0.1.0",
+  "description": "HeroSignal Cordova eklentisi: push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu",
+  "license": "MIT",
+  "author": "HeroSignal <sdk@herosignal.dev>",
+  "homepage": "https://github.com/herosignal/herosignal",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/herosignal/herosignal.git",
+    "directory": "sdk/cordova"
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-android",
+    "cordova-ios",
+    "push",
+    "notifications",
+    "herosignal"
+  ],
+  "cordova": {
+    "id": "cordova-plugin-herosignal",
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  },
+  "engines": {
+    "cordovaDependencies": {
+      "0.1.0": {
+        "cordova": ">=12.0.0",
+        "cordova-android": ">=12.0.0",
+        "cordova-ios": ">=7.0.0"
+      }
+    }
+  },
+  "types": "./types/index.d.ts",
+  "files": [
+    "plugin.xml",
+    "www/",
+    "src/",
+    "types/"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

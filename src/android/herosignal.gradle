@@ -1,0 +1,12 @@
+// HeroSignal Cordova eklentisi: uygulama modülüne (platforms/android/app) uygulanır.
+// Native SDK (sdk/android) Maven Central'dan veya yerelde `gradle publishToMavenLocal` ile yayınlanmış
+// artefakttan alınır.
+repositories {
+    google()
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation 'com.herosignal:herosignal-android:0.1.0'
+}

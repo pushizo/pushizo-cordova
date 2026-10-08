@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        id="cordova-plugin-herosignal"
+        version="0.1.0">
+    <name>HeroSignal</name>
+    <description>HeroSignal push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu eklentisi</description>
+    <license>MIT</license>
+    <keywords>push,notifications,fcm,apns,in-app,herosignal</keywords>
+    <repo>https://github.com/herosignal/herosignal.git</repo>
+
+    <engines>
+        <engine name="cordova" version=">=12.0.0" />
+        <engine name="cordova-android" version=">=12.0.0" />
+        <engine name="cordova-ios" version=">=7.0.0" />
+    </engines>
+
+    <js-module src="www/herosignal.js" name="HeroSignal">
+        <clobbers target="HeroSignal" />
+    </js-module>
+
+    <!-- ================= Android ================= -->
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="HeroSignal">
+                <param name="android-package" value="com.herosignal.cordova.HeroSignalCordova" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <!-- Köprü Kotlin ile yazıldığından Kotlin Gradle eklentisi ve Java 17 hedefi gerekir (native SDK JVM 17). -->
+        <config-file target="config.xml" parent="/*">
+            <preference name="GradlePluginKotlinEnabled" value="true" />
+            <preference name="GradlePluginKotlinVersion" value="2.0.21" />
+            <preference name="AndroidJavaSourceCompatibility" value="17" />
+            <preference name="AndroidJavaTargetCompatibility" value="17" />
+            <preference name="AndroidKotlinJVMTarget" value="17" />
+            <!-- FCM: google-services.json işlenir (dosya config.xml'de resource-file ile eklenir). -->
+            <preference name="GradlePluginGoogleServicesEnabled" value="true" />
+        </config-file>
+
+        <config-file target="AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        </config-file>
+
+        <!--
+            FCM servisi ve bildirim tıklama/kapama bileşenleri. Native SDK AAR'ı da aynı tanımları manifest
+            birleştirmesiyle ekler; aynı adlı bileşenler birleştirilir, uygulama tarafında ek iş gerekmez.
+        -->
+        <config-file target="AndroidManifest.xml" parent="/manifest/application">
+            <service
+                android:name="com.herosignal.sdk.HeroSignalMessagingService"
+                android:exported="false">
+                <intent-filter>
+                    <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                </intent-filter>
+            </service>
+            <activity
+                android:name="com.herosignal.sdk.NotificationOpenActivity"
+                android:exported="false"
+                android:excludeFromRecents="true"
+                android:noHistory="true"
+                android:taskAffinity=""
+                android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            <receiver
+                android:name="com.herosignal.sdk.NotificationOpenedReceiver"
+                android:exported="false" />
+            <receiver
+                android:name="com.herosignal.sdk.NotificationDismissedReceiver"
+                android:exported="false" />
+        </config-file>
+
+        <source-file src="src/android/com/herosignal/cordova/HeroSignalCordova.kt"
+                     target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+
+        <!-- Native SDK bağımlılığı ve depo tanımları (sdk/android → com.herosignal:herosignal-android). -->
+        <framework src="src/android/herosignal.gradle" custom="true" type="gradleReference" />
+    </platform>
+
+    <!-- ================= iOS ================= -->
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="HeroSignal">
+                <param name="ios-package" value="HeroSignalCordova" />
+                <param name="onload" value="true" />
+            </feature>
+            <preference name="SwiftVersion" value="5.9" />
+            <preference name="deployment-target" value="15.0" />
+        </config-file>
+
+        <!-- Push capability: arka planda uzak bildirim ve APNs ortamı (Debug: development, Release: production). -->
+        <config-file target="*-Info.plist" parent="UIBackgroundModes">
+            <array>
+                <string>remote-notification</string>
+            </array>
+        </config-file>
+        <config-file target="*-Debug.plist" parent="aps-environment">
+            <string>development</string>
+        </config-file>
+        <config-file target="*-Release.plist" parent="aps-environment">
+            <string>production</string>
+        </config-file>
+
+        <source-file src="src/ios/HeroSignalCordova.swift" />
+
+        <podspec>
+            <config>
+                <source url="https://cdn.cocoapods.org/" />
+            </config>
+            <pods use-frameworks="true">
+                <!-- Monorepo/yerel geliştirmede Podfile'da: pod 'HeroSignal', :path => '<repo>/sdk/ios' -->
+                <pod name="HeroSignal" spec="~> 0.1" />
+            </pods>
+        </podspec>
+    </platform>
+</plugin>
