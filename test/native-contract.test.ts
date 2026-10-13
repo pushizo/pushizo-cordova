@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = join(__dirname, '..');
-const read = (p: string) => readFileSync(join(root, p), 'utf8');
+// Windows'ta `core.autocrlf` dosyaları CRLF ile çıkarır; sözleşme denetimi satır sonundan bağımsızdır.
+const read = (p: string) => readFileSync(join(root, p), 'utf8').replace(/\r\n/g, '\n');
 
 /** Cephenin native'e gönderdiği metot adları. */
 function facadeMethods(): Set<string> {
