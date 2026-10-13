@@ -4,10 +4,10 @@
   "description": "HeroSignal Cordova eklentisi: push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Android + iOS)",
   "license": "MIT",
   "author": "HeroSignal <sdk@herosignal.dev>",
-  "homepage": "https://github.com/herosignal/herosignal",
+  "homepage": "https://github.com/exec0de/herosignal",
   "repository": {
     "type": "git",
-    "url": "https://github.com/herosignal/herosignal.git",
+    "url": "https://github.com/exec0de/herosignal.git",
     "directory": "sdk/cordova"
   },
   "keywords": [
