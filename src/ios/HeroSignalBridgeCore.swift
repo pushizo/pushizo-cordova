@@ -190,6 +190,7 @@ final class HeroSignalBridgeCore: NSObject {
             if method == "addSms" { HeroSignal.User.addSms(phone) } else { HeroSignal.User.removeSms(phone) }
             ok()
         case "getUser": ok(["id": Self.orNull(HeroSignal.User.id), "externalId": Self.orNull(HeroSignal.User.externalId)])
+        case "getContacts": ok(["emails": HeroSignal.User.emails, "smsNumbers": HeroSignal.User.smsNumbers])
         // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
         case "getPreferences":
             inbox(reply) { Self.map(try await HeroSignal.User.getPreferences()) }
@@ -221,8 +222,11 @@ final class HeroSignalBridgeCore: NSObject {
                 DispatchQueue.main.async { ok(["permission": granted]) }
             }
         case "clearAll": HeroSignal.Notifications.clearAll(); ok()
-        // Tekil kaldırma Android tepsi kimliği ister; iOS'ta karşılığı olmadığından çağrı etkisiz tamamlanır (eski sağlayıcı ile aynı).
-        case "removeNotification": ok()
+        // iOS kimliği `UNNotificationRequest.identifier` metnidir; tamsayı verilirse metne çevrilerek aranır.
+        case "removeNotification":
+            let requested = string("identifier") ?? (args["id"] as? NSNumber).map { "\($0.intValue)" }
+            guard let identifier = requested else { invalid("identifier gerekli"); return true }
+            HeroSignal.Notifications.removeNotification(identifier: identifier); ok()
         case "removeGroupedNotifications":
             guard let group = string("group") else { invalid("group gerekli"); return true }
             HeroSignal.Notifications.removeGroupedNotifications(group); ok()

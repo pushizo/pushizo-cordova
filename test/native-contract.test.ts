@@ -51,6 +51,19 @@ describe('native sözleşme', () => {
     expect(selectors.has('setEventCallback')).toBe(true);
   });
 
+  it('bildirim kaldırma ve e-posta/SMS listeleri gerçek native SDK çağrılarına bağlı', () => {
+    expect(methods.has('getContacts')).toBe(true);
+    const kt = read('src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt');
+    expect(kt).toContain('HeroSignal.Notifications.removeNotification(id)');
+    expect(kt).toContain('JSONArray(HeroSignal.User.emails)');
+    expect(kt).toContain('JSONArray(HeroSignal.User.smsNumbers)');
+    const swift = read('src/ios/HeroSignalBridgeCore.swift');
+    expect(swift).toContain('HeroSignal.Notifications.removeNotification(identifier: identifier)');
+    expect(swift).toContain('HeroSignal.Notifications.removeGroupedNotifications(group)');
+    expect(swift).toContain('"emails": HeroSignal.User.emails, "smsNumbers": HeroSignal.User.smsNumbers');
+    expect(swift).not.toMatch(/case "removeNotification": ok\(\)/);
+  });
+
   it('plugin.xml dosya başvuruları mevcut', () => {
     const xml = read('plugin.xml');
     const refs = [...xml.matchAll(/<(?:js-module|source-file|framework)[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]).filter((s) => !s.includes(':'));
