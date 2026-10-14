@@ -60,6 +60,10 @@ export declare class HeroSignalCore {
         removeSms: (phoneNumber: string) => Promise<void>;
         getExternalId: () => Promise<string | null>;
         getId: () => Promise<string | null>;
+        /** Bu cihazda `addEmail` ile kaydedilmiş e-posta adresleri (yerel kayıt; sunucu sorgulanmaz). */
+        getEmails: () => Promise<string[]>;
+        /** Bu cihazda `addSms` ile kaydedilmiş SMS numaraları (E.164; yerel kayıt). */
+        getSmsNumbers: () => Promise<string[]>;
         /**
          * Kullanıcının kategori/kanal tercihleri ve app kategorileri (ADR-0019 §4); sahiplik kanıtı yerel SDK'da eklenir.
          * Abonelik henüz yoksa `NOT_READY` koduyla reddedilir.
@@ -86,8 +90,11 @@ export declare class HeroSignalCore {
         requestPermission: () => Promise<boolean>;
         /** Tepsideki/bildirim merkezindeki tüm HeroSignal bildirimlerini kaldırır ve rozeti sıfırlar. */
         clearAll: () => Promise<void>;
-        /** Yalnızca Android: tek bildirimi `notification.androidNotificationId` ile kaldırır (iOS/web'de etkisiz). */
-        removeNotification: (androidNotificationId: number) => Promise<void>;
+        /**
+         * Tek bildirimi kaldırır. Android: `notification.androidNotificationId` (tamsayı). iOS: bildirim isteği kimliği
+         * (`UNNotificationRequest.identifier`, metin; tamsayı verilirse metne çevrilir). Web'de `UNAVAILABLE`.
+         */
+        removeNotification: (id: number | string) => Promise<void>;
         /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
         removeGroupedNotifications: (group: string) => Promise<void>;
         /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */

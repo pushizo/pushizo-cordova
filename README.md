@@ -77,7 +77,7 @@ await HeroSignal.User.setPreferences([
 
 await HeroSignal.Notifications.clearAll();
 await HeroSignal.Notifications.removeGroupedNotifications('orders');
-await HeroSignal.Notifications.removeNotification(id);        // yalnızca Android (notification.androidNotificationId)
+await HeroSignal.Notifications.removeNotification(id);        // Android: notification.androidNotificationId; iOS: UNNotificationRequest.identifier (metin)
 await HeroSignal.setConsentGiven(true);                       // requiresPrivacyConsent: true ile başlatıldıysa
 await HeroSignal.Debug.setLogLevel('debug');
 await HeroSignal.logout();

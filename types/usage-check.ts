@@ -12,6 +12,9 @@ async function usage(): Promise<void> {
   const first: HeroSignal.UserPreference | undefined = (await window.HeroSignal.User.getPreferences()).preferences[0];
   void prefs.categories;
   void first;
+  const emails: string[] = await HeroSignal.User.getEmails();
+  const sms: string[] = await window.HeroSignal.User.getSmsNumbers();
+  await HeroSignal.Notifications.removeNotification(emails.length > 0 ? 'ios-request-id' : sms.length);
 }
 
 void usage;

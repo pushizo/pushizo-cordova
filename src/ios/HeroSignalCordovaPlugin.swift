@@ -106,6 +106,7 @@ class HeroSignalCordovaPlugin: CDVPlugin {
     @objc(addSms:) func addSms(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(removeSms:) func removeSms(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(getUser:) func getUser(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getContacts:) func getContacts(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(getPreferences:) func getPreferences(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setPreferences:) func setPreferences(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(getPushSubscription:) func getPushSubscription(_ command: CDVInvokedUrlCommand) { dispatch(command) }

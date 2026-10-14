@@ -116,6 +116,13 @@ function textMap(value: unknown): Record<string, string> {
   return out;
 }
 
+/** `getContacts` yanıtı: bu cihazda kayıtlı e-posta adresleri ve SMS numaraları. */
+type RawContacts = { emails?: unknown; smsNumbers?: unknown } | null | undefined;
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+}
+
 /** Native tercih yanıtını eksik alanlara karşı normalize eder (zamanlar epoch milisaniye). */
 function normalizePreferences(raw: RawPreferences): UserPreferences {
   const preferences = Array.isArray(raw?.preferences) ? raw.preferences : [];
@@ -356,6 +363,11 @@ export class HeroSignalCore {
     getExternalId: async (): Promise<string | null> =>
       (await this.bridge.call<{ externalId: string | null }>('getUser')).externalId ?? null,
     getId: async (): Promise<string | null> => (await this.bridge.call<{ id: string | null }>('getUser')).id ?? null,
+    /** Bu cihazda `addEmail` ile kaydedilmiş e-posta adresleri (yerel kayıt; sunucu sorgulanmaz). */
+    getEmails: async (): Promise<string[]> => stringArray((await this.bridge.call<RawContacts>('getContacts'))?.emails),
+    /** Bu cihazda `addSms` ile kaydedilmiş SMS numaraları (E.164; yerel kayıt). */
+    getSmsNumbers: async (): Promise<string[]> =>
+      stringArray((await this.bridge.call<RawContacts>('getContacts'))?.smsNumbers),
     /**
      * Kullanıcının kategori/kanal tercihleri ve app kategorileri (ADR-0019 §4); sahiplik kanıtı yerel SDK'da eklenir.
      * Abonelik henüz yoksa `NOT_READY` koduyla reddedilir.
@@ -394,10 +406,14 @@ export class HeroSignalCore {
       Boolean((await this.bridge.call<{ permission: boolean }>('requestPermission')).permission),
     /** Tepsideki/bildirim merkezindeki tüm HeroSignal bildirimlerini kaldırır ve rozeti sıfırlar. */
     clearAll: (): Promise<void> => this.bridge.call('clearAll'),
-    /** Yalnızca Android: tek bildirimi `notification.androidNotificationId` ile kaldırır (iOS/web'de etkisiz). */
-    removeNotification: (androidNotificationId: number): Promise<void> => {
-      if (!Number.isInteger(androidNotificationId)) throw new TypeError('HeroSignal: androidNotificationId tamsayı olmalı.');
-      return this.bridge.call('removeNotification', { id: androidNotificationId });
+    /**
+     * Tek bildirimi kaldırır. Android: `notification.androidNotificationId` (tamsayı). iOS: bildirim isteği kimliği
+     * (`UNNotificationRequest.identifier`, metin; tamsayı verilirse metne çevrilir). Web'de `UNAVAILABLE`.
+     */
+    removeNotification: (id: number | string): Promise<void> => {
+      if (typeof id === 'string') return this.bridge.call('removeNotification', { identifier: requireString(id, 'identifier') });
+      if (!Number.isInteger(id)) throw new TypeError('HeroSignal: androidNotificationId tamsayı olmalı.');
+      return this.bridge.call('removeNotification', { id });
     },
     /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
     removeGroupedNotifications: (group: string): Promise<void> =>

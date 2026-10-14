@@ -156,6 +156,9 @@ internal class HeroSignalBridgeCore(
                 "addSms" -> { HeroSignal.User.addSms(args.requireString("phoneNumber")); reply.success(null) }
                 "removeSms" -> { HeroSignal.User.removeSms(args.requireString("phoneNumber")); reply.success(null) }
                 "getUser" -> reply.success(JSONObject().put("id", HeroSignal.User.id.orNull()).put("externalId", HeroSignal.User.externalId.orNull()))
+                "getContacts" -> reply.success(
+                    JSONObject().put("emails", JSONArray(HeroSignal.User.emails)).put("smsNumbers", JSONArray(HeroSignal.User.smsNumbers)),
+                )
                 // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
                 "getPreferences" -> HeroSignal.User.getPreferences(callback(reply) { it.toJson() })
                 "setPreferences" -> HeroSignal.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
@@ -167,8 +170,13 @@ internal class HeroSignalBridgeCore(
                 "getPermission" -> reply.success(permissionJson())
                 "clearAll" -> { HeroSignal.Notifications.clearAll(); reply.success(null) }
                 "removeNotification" -> {
-                    if (!args.has("id")) throw IllegalArgumentException("id gerekli")
-                    HeroSignal.Notifications.removeNotification(args.getInt("id"))
+                    // Android tepsi kimliği tamsayıdır; metin kimlik (iOS biçimi) yalnızca sayıysa kabul edilir.
+                    val id = when {
+                        args.has("id") -> args.getInt("id")
+                        else -> args.optStringOrNull("identifier")?.trim()?.toIntOrNull()
+                            ?: throw IllegalArgumentException("id gerekli (Android bildirim kimliği tamsayıdır)")
+                    }
+                    HeroSignal.Notifications.removeNotification(id)
                     reply.success(null)
                 }
                 "removeGroupedNotifications" -> { HeroSignal.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }

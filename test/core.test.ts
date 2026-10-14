@@ -98,6 +98,18 @@ describe('HeroSignalCore', () => {
     expect(await hs.Notifications.requestPermission()).toBe(true);
   });
 
+  it('e-posta ve SMS listeleri getContacts yanıtından okunur', async () => {
+    const f = fakeBridge({ getContacts: { emails: ['a@example.com', 7], smsNumbers: ['+905321234567'] } });
+    const hs = new HeroSignalCore(f.bridge);
+    expect(await hs.User.getEmails()).toEqual(['a@example.com']);
+    expect(await hs.User.getSmsNumbers()).toEqual(['+905321234567']);
+    expect(f.calls.map((c) => c.method)).toEqual(['getContacts', 'getContacts']);
+
+    const empty = new HeroSignalCore(fakeBridge({ getContacts: null }).bridge);
+    expect(await empty.User.getEmails()).toEqual([]);
+    expect(await empty.User.getSmsNumbers()).toEqual([]);
+  });
+
   it('e-posta, SMS, alias, dil ve olay çağrıları doğru argümanlarla gider', async () => {
     const f = fakeBridge();
     const hs = new HeroSignalCore(f.bridge);
@@ -317,15 +329,18 @@ describe('HeroSignalCore', () => {
     const hs = new HeroSignalCore(f.bridge);
     await hs.Notifications.clearAll();
     await hs.Notifications.removeNotification(7);
+    await hs.Notifications.removeNotification('ios-req-1');
     await hs.Notifications.removeGroupedNotifications('orders');
     await hs.InAppMessages.setScreen('');
     await hs.InAppMessages.setScreen('checkout');
     await hs.InAppMessages.setPaused(true);
     expect(await hs.InAppMessages.getPaused()).toBe(true);
     expect(() => hs.Notifications.removeNotification(1.5)).toThrow(TypeError);
+    expect(() => hs.Notifications.removeNotification(' ')).toThrow(TypeError);
     expect(f.calls.map((c) => [c.method, c.args])).toEqual([
       ['clearAll', undefined],
       ['removeNotification', { id: 7 }],
+      ['removeNotification', { identifier: 'ios-req-1' }],
       ['removeGroupedNotifications', { group: 'orders' }],
       ['setScreen', { name: null }],
       ['setScreen', { name: 'checkout' }],
