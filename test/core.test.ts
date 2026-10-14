@@ -266,6 +266,52 @@ describe('HeroSignalCore', () => {
     expect(f.calls.at(-1)).toEqual({ method: 'inboxArchive', args: { id: 'i1' } });
   });
 
+  it('tercihler: girdi doğrulanır, native yanıtı normalize edilir', async () => {
+    const raw = {
+      preferences: [
+        { category: 'promo', channel: null, optedIn: true, explicit: false, source: null, updatedAt: null },
+        { category: 'promo', channel: 'email', optedIn: false, explicit: true, source: 'sdk', updatedAt: 1760000000000 },
+        { category: 'news', optedIn: true },
+      ],
+      categories: [
+        { key: 'promo', name: { tr: 'Kampanya', en: 'Promotions' }, description: { tr: 'İndirimler' }, channels: ['email', 'sms'], defaultOptedIn: false },
+        { key: 'news', name: { en: 'News', bad: 3 }, channels: null },
+      ],
+    };
+    const f = fakeBridge({ getPreferences: raw, setPreferences: raw });
+    const hs = new HeroSignalCore(f.bridge);
+
+    const prefs = await hs.User.getPreferences();
+    expect(f.calls[0]).toEqual({ method: 'getPreferences', args: undefined });
+    expect(prefs.preferences[1]).toEqual({ category: 'promo', channel: 'email', optedIn: false, explicit: true, source: 'sdk', updatedAt: 1760000000000 });
+    expect(prefs.preferences[2]).toEqual({ category: 'news', channel: null, optedIn: true, explicit: false, source: null, updatedAt: null });
+    expect(prefs.categories[0]).toEqual(raw.categories[0]);
+    expect(prefs.categories[1]).toEqual({ key: 'news', name: { en: 'News' }, description: {}, channels: null, defaultOptedIn: true });
+
+    await hs.User.setPreferences([{ category: ' promo ', optedIn: false }, { category: 'news', channel: 'sms', optedIn: true }]);
+    expect(f.calls.at(-1)).toEqual({
+      method: 'setPreferences',
+      args: {
+        preferences: [
+          { category: 'promo', channel: null, optedIn: false },
+          { category: 'news', channel: 'sms', optedIn: true },
+        ],
+      },
+    });
+
+    const calls = f.calls.length;
+    await expect(hs.User.setPreferences([])).rejects.toThrow(RangeError);
+    await expect(hs.User.setPreferences(Array.from({ length: 101 }, () => ({ category: 'a', optedIn: true })))).rejects.toThrow(RangeError);
+    await expect(hs.User.setPreferences([{ category: 'x'.repeat(65), optedIn: true }])).rejects.toThrow(/64/);
+    await expect(hs.User.setPreferences([{ category: '', optedIn: true }])).rejects.toThrow(TypeError);
+    await expect(hs.User.setPreferences([{ category: 'a', channel: 'fax' as never, optedIn: true }])).rejects.toThrow(/channel/);
+    await expect(hs.User.setPreferences([{ category: 'a', optedIn: 'yes' as never }])).rejects.toThrow(/optedIn/);
+    expect(f.calls.length).toBe(calls);
+
+    const empty = new HeroSignalCore(fakeBridge({ getPreferences: null }).bridge);
+    expect(await empty.User.getPreferences()).toEqual({ preferences: [], categories: [] });
+  });
+
   it('bildirim tepsisi ve in-app yardımcıları', async () => {
     const f = fakeBridge({ getInAppPaused: { paused: true } });
     const hs = new HeroSignalCore(f.bridge);

@@ -99,6 +99,41 @@ export interface InboxListOptions {
     limit?: number;
     cursor?: string;
 }
+/** Tercih kanalı (ADR-0019 §4); tercihlerde `null` tüm kanallar demektir. */
+export type PreferenceChannel = 'ios_push' | 'android_push' | 'web_push' | 'email' | 'sms';
+/**
+ * Kullanıcı tercihi: kategori × kanal → opt-in. `explicit` false ise değer kategori varsayılanından
+ * türetilmiştir; `source` kaydı yazan taraftır (sdk, api, preference_center…).
+ */
+export interface UserPreference {
+    category: string;
+    /** null = tüm kanallar. */
+    channel: PreferenceChannel | null;
+    optedIn: boolean;
+    explicit: boolean;
+    source: string | null;
+    /** Epoch milisaniye; türetilmiş değerde null. */
+    updatedAt: number | null;
+}
+/** Mesaj kategorisi: çok dilli ad/açıklama (`dil kodu → metin`), kanal kısıtı (null = tümü) ve varsayılan opt-in. */
+export interface PreferenceCategory {
+    key: string;
+    name: Record<string, string>;
+    description: Record<string, string>;
+    channels: string[] | null;
+    defaultOptedIn: boolean;
+}
+/** `User.getPreferences` / `User.setPreferences` sonucu: kullanıcının tercihleri ve app'in kategorileri. */
+export interface UserPreferences {
+    preferences: UserPreference[];
+    categories: PreferenceCategory[];
+}
+/** `User.setPreferences` girdisi; `channel` verilmezse veya null ise tüm kanallar. */
+export interface PreferenceInput {
+    category: string;
+    optedIn: boolean;
+    channel?: PreferenceChannel | null;
+}
 export type InAppTriggerValue = string | number | boolean;
 /** Native katmanın gönderdiği ham ön plan olayı. */
 export interface RawForegroundEvent {

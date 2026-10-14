@@ -7,6 +7,11 @@ async function usage(): Promise<void> {
   HeroSignal.Notifications.addClickListener((e) => click(e));
   const page: HeroSignal.InboxPage = await window.HeroSignal.Inbox.list({ limit: 10 });
   void page.unreadCount;
+  const input: HeroSignal.PreferenceInput = { category: 'promo', channel: 'email', optedIn: false };
+  const prefs: HeroSignal.UserPreferences = await HeroSignal.User.setPreferences([input]);
+  const first: HeroSignal.UserPreference | undefined = (await window.HeroSignal.User.getPreferences()).preferences[0];
+  void prefs.categories;
+  void first;
 }
 
 void usage;
