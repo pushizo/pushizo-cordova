@@ -1,4 +1,4 @@
-import type { ForegroundWillDisplayEvent, HeroSignalNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LogLevel, NotificationClickEvent, PermissionChangeEvent, PushSubscriptionState } from './definitions';
+import type { ForegroundWillDisplayEvent, HeroSignalNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LogLevel, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -60,6 +60,13 @@ export declare class HeroSignalCore {
         removeSms: (phoneNumber: string) => Promise<void>;
         getExternalId: () => Promise<string | null>;
         getId: () => Promise<string | null>;
+        /**
+         * Kullanıcının kategori/kanal tercihleri ve app kategorileri (ADR-0019 §4); sahiplik kanıtı yerel SDK'da eklenir.
+         * Abonelik henüz yoksa `NOT_READY` koduyla reddedilir.
+         */
+        getPreferences: () => Promise<UserPreferences>;
+        /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
+        setPreferences: (preferences: PreferenceInput[]) => Promise<UserPreferences>;
         pushSubscription: {
             getState: () => Promise<PushSubscriptionState>;
             getId: () => Promise<string | null>;

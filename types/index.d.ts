@@ -23,6 +23,11 @@ declare namespace HeroSignal {
   type InboxItem = Definitions.InboxItem;
   type InboxPage = Definitions.InboxPage;
   type InboxListOptions = Definitions.InboxListOptions;
+  type PreferenceChannel = Definitions.PreferenceChannel;
+  type UserPreference = Definitions.UserPreference;
+  type PreferenceCategory = Definitions.PreferenceCategory;
+  type UserPreferences = Definitions.UserPreferences;
+  type PreferenceInput = Definitions.PreferenceInput;
 }
 
 export = HeroSignal;

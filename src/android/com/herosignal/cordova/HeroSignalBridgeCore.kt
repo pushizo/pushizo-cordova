@@ -12,7 +12,11 @@ import com.herosignal.sdk.HsInAppLifecycleListener
 import com.herosignal.sdk.HsInboxItem
 import com.herosignal.sdk.HsInboxPage
 import com.herosignal.sdk.HsLog
+import com.herosignal.sdk.HsMessageCategory
 import com.herosignal.sdk.HsNotification
+import com.herosignal.sdk.HsPreference
+import com.herosignal.sdk.HsPreferenceInput
+import com.herosignal.sdk.HsPreferencesResult
 import com.herosignal.sdk.HsPushSubscriptionState
 import org.json.JSONArray
 import org.json.JSONObject
@@ -152,6 +156,9 @@ internal class HeroSignalBridgeCore(
                 "addSms" -> { HeroSignal.User.addSms(args.requireString("phoneNumber")); reply.success(null) }
                 "removeSms" -> { HeroSignal.User.removeSms(args.requireString("phoneNumber")); reply.success(null) }
                 "getUser" -> reply.success(JSONObject().put("id", HeroSignal.User.id.orNull()).put("externalId", HeroSignal.User.externalId.orNull()))
+                // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
+                "getPreferences" -> HeroSignal.User.getPreferences(callback(reply) { it.toJson() })
+                "setPreferences" -> HeroSignal.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
 
                 "getPushSubscription" -> reply.success(HeroSignal.User.pushSubscription.state.toJson())
                 "optIn" -> { HeroSignal.User.pushSubscription.optIn(); reply.success(null) }
@@ -271,6 +278,34 @@ internal class HeroSignalBridgeCore(
             .put("unreadCount", unreadCount)
             .put("nextCursor", nextCursor.orNull())
             .put("hasMore", hasMore)
+
+        fun HsPreference.toJson(): JSONObject = JSONObject()
+            .put("category", category)
+            .put("channel", channel.orNull())
+            .put("optedIn", optedIn)
+            .put("explicit", explicit)
+            .put("source", source.orNull())
+            .put("updatedAt", updatedAt.orNull())
+
+        fun HsMessageCategory.toJson(): JSONObject = JSONObject()
+            .put("key", key)
+            .put("name", JSONObject(name))
+            .put("description", JSONObject(description))
+            .put("channels", channels?.let { JSONArray(it) }.orNull())
+            .put("defaultOptedIn", defaultOptedIn)
+
+        fun HsPreferencesResult.toJson(): JSONObject = JSONObject()
+            .put("preferences", JSONArray(preferences.map { it.toJson() }))
+            .put("categories", JSONArray(categories.map { it.toJson() }))
+
+        /** JS `{ category, channel, optedIn }[]` → SDK girdisi; kural denetimi (1-100, kanal) SDK'dadır. */
+        fun JSONObject.preferenceInputs(key: String): List<HsPreferenceInput> {
+            val arr = optJSONArray(key) ?: throw IllegalArgumentException("$key gerekli")
+            return (0 until arr.length()).map { i ->
+                val item = arr.optJSONObject(i) ?: throw IllegalArgumentException("$key[$i] nesne olmalı")
+                HsPreferenceInput(item.requireString("category"), item.optStringOrNull("channel"), item.optBoolean("optedIn", false))
+            }
+        }
 
         private fun Any?.orNull(): Any = this ?: JSONObject.NULL
 

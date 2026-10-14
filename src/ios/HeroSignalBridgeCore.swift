@@ -190,6 +190,17 @@ final class HeroSignalBridgeCore: NSObject {
             if method == "addSms" { HeroSignal.User.addSms(phone) } else { HeroSignal.User.removeSms(phone) }
             ok()
         case "getUser": ok(["id": Self.orNull(HeroSignal.User.id), "externalId": Self.orNull(HeroSignal.User.externalId)])
+        // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
+        case "getPreferences":
+            inbox(reply) { Self.map(try await HeroSignal.User.getPreferences()) }
+        case "setPreferences":
+            guard let raw = args["preferences"] as? [Any] else { invalid("preferences gerekli"); return true }
+            let items = raw.compactMap { $0 as? [String: Any] }
+            guard items.count == raw.count else { invalid("preferences öğeleri nesne olmalı"); return true }
+            let inputs = items.map {
+                HSPreferenceInput(category: $0["category"] as? String ?? "", channel: $0["channel"] as? String, optedIn: $0["optedIn"] as? Bool ?? false)
+            }
+            inbox(reply) { Self.map(try await HeroSignal.User.setPreferences(inputs)) }
 
         case "getPushSubscription":
             Task {
@@ -312,6 +323,19 @@ final class HeroSignalBridgeCore: NSObject {
         ["id": item.id, "messageId": orNull(item.messageId), "title": orNull(item.title), "body": orNull(item.body),
          "url": orNull(item.url), "imageUrl": orNull(item.imageUrl), "data": item.data, "read": item.read,
          "readAt": millis(item.readAt), "archivedAt": millis(item.archivedAt), "expiresAt": millis(item.expiresAt), "createdAt": millis(item.createdAt)]
+    }
+
+    static func map(_ p: HSPreference) -> [String: Any] {
+        ["category": p.category, "channel": orNull(p.channel), "optedIn": p.optedIn, "explicit": p.explicit,
+         "source": orNull(p.source), "updatedAt": millis(p.updatedAt)]
+    }
+
+    static func map(_ c: HSMessageCategory) -> [String: Any] {
+        ["key": c.key, "name": c.name, "description": c.description, "channels": orNull(c.channels), "defaultOptedIn": c.defaultOptedIn]
+    }
+
+    static func map(_ r: HSPreferencesResult) -> [String: Any] {
+        ["preferences": r.preferences.map { map($0) }, "categories": r.categories.map { map($0) }]
     }
 
     static func map(_ page: HSInboxPage) -> [String: Any] {

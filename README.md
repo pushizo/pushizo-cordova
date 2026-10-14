@@ -68,6 +68,13 @@ await HeroSignal.Inbox.markRead(page.items[0].id);
 await HeroSignal.Inbox.markAllRead();
 await HeroSignal.Inbox.archive(page.items[0].id);
 
+// Tercihler (kategori × kanal opt-in; channel verilmezse tüm kanallar). Abonelik yoksa NOT_READY.
+const { preferences, categories } = await HeroSignal.User.getPreferences();
+await HeroSignal.User.setPreferences([
+  { category: 'promo', optedIn: false },
+  { category: 'news', channel: 'email', optedIn: true },
+]);                                                           // güncel listeyi döndürür
+
 await HeroSignal.Notifications.clearAll();
 await HeroSignal.Notifications.removeGroupedNotifications('orders');
 await HeroSignal.Notifications.removeNotification(id);        // yalnızca Android (notification.androidNotificationId)

@@ -19,9 +19,12 @@ import type {
   LogLevel,
   NotificationClickEvent,
   PermissionChangeEvent,
+  PreferenceChannel,
+  PreferenceInput,
   PushSubscriptionState,
   RawForegroundEvent,
   RawInAppLifecycleEvent,
+  UserPreferences,
 } from './definitions';
 
 /** Native katmandan gelen olay adları. */
@@ -74,6 +77,66 @@ function stringRecord(input: Record<string, unknown>, name: string): Record<stri
     out[key] = String(value);
   }
   return out;
+}
+
+const PREFERENCE_CHANNELS: readonly PreferenceChannel[] = ['ios_push', 'android_push', 'web_push', 'email', 'sms'];
+
+/** Native tercih yanıtı (alanlar eksik gelebilir; `normalizePreferences` tamamlar). */
+type RawPreferences = Partial<UserPreferences> | null | undefined;
+
+/** Native'e giden doğrulanmış tercih kaydı. */
+interface PreferenceArg {
+  category: string;
+  channel: PreferenceChannel | null;
+  optedIn: boolean;
+}
+
+/** `setPreferences` girdisini yerel SDK kurallarıyla doğrular: 1-100 kayıt, kategori 1-64 karakter, bilinen kanal. */
+function preferenceArgs(input: PreferenceInput[]): PreferenceArg[] {
+  if (!Array.isArray(input) || input.length === 0 || input.length > 100) {
+    throw new RangeError('HeroSignal: preferences 1-100 kayıt olmalı.');
+  }
+  return input.map((p, i) => {
+    if (p === null || typeof p !== 'object') throw new TypeError(`HeroSignal: preferences[${i}] bir nesne olmalı.`);
+    const category = requireString(p.category, `preferences[${i}].category`).trim();
+    if (category.length > 64) throw new RangeError(`HeroSignal: preferences[${i}].category en fazla 64 karakter olmalı.`);
+    const channel = p.channel ?? null;
+    if (channel !== null && !PREFERENCE_CHANNELS.includes(channel)) {
+      throw new TypeError(`HeroSignal: preferences[${i}].channel ${PREFERENCE_CHANNELS.join('|')} veya null olmalı.`);
+    }
+    if (typeof p.optedIn !== 'boolean') throw new TypeError(`HeroSignal: preferences[${i}].optedIn boolean olmalı.`);
+    return { category, channel, optedIn: p.optedIn };
+  });
+}
+
+function textMap(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return out;
+  for (const [key, text] of Object.entries(value)) if (typeof text === 'string') out[key] = text;
+  return out;
+}
+
+/** Native tercih yanıtını eksik alanlara karşı normalize eder (zamanlar epoch milisaniye). */
+function normalizePreferences(raw: RawPreferences): UserPreferences {
+  const preferences = Array.isArray(raw?.preferences) ? raw.preferences : [];
+  const categories = Array.isArray(raw?.categories) ? raw.categories : [];
+  return {
+    preferences: preferences.map((p) => ({
+      category: p.category,
+      channel: p.channel ?? null,
+      optedIn: p.optedIn === true,
+      explicit: p.explicit === true,
+      source: p.source ?? null,
+      updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : null,
+    })),
+    categories: categories.map((c) => ({
+      key: c.key,
+      name: textMap(c.name),
+      description: textMap(c.description),
+      channels: Array.isArray(c.channels) ? c.channels.filter((x): x is string => typeof x === 'string') : null,
+      defaultOptedIn: c.defaultOptedIn !== false,
+    })),
+  };
 }
 
 /** Native bildirim nesnesini eksik alanlara karşı normalize eder. */
@@ -293,6 +356,15 @@ export class HeroSignalCore {
     getExternalId: async (): Promise<string | null> =>
       (await this.bridge.call<{ externalId: string | null }>('getUser')).externalId ?? null,
     getId: async (): Promise<string | null> => (await this.bridge.call<{ id: string | null }>('getUser')).id ?? null,
+    /**
+     * Kullanıcının kategori/kanal tercihleri ve app kategorileri (ADR-0019 §4); sahiplik kanıtı yerel SDK'da eklenir.
+     * Abonelik henüz yoksa `NOT_READY` koduyla reddedilir.
+     */
+    getPreferences: async (): Promise<UserPreferences> =>
+      normalizePreferences(await this.bridge.call<RawPreferences>('getPreferences')),
+    /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
+    setPreferences: async (preferences: PreferenceInput[]): Promise<UserPreferences> =>
+      normalizePreferences(await this.bridge.call<RawPreferences>('setPreferences', { preferences: preferenceArgs(preferences) })),
     pushSubscription: {
       getState: (): Promise<PushSubscriptionState> => this.bridge.call<PushSubscriptionState>('getPushSubscription'),
       getId: async (): Promise<string | null> =>

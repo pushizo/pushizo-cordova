@@ -34,6 +34,62 @@ function stringRecord(input, name) {
     }
     return out;
 }
+const PREFERENCE_CHANNELS = ['ios_push', 'android_push', 'web_push', 'email', 'sms'];
+/** `setPreferences` girdisini yerel SDK kurallarıyla doğrular: 1-100 kayıt, kategori 1-64 karakter, bilinen kanal. */
+function preferenceArgs(input) {
+    if (!Array.isArray(input) || input.length === 0 || input.length > 100) {
+        throw new RangeError('HeroSignal: preferences 1-100 kayıt olmalı.');
+    }
+    return input.map((p, i) => {
+        var _a;
+        if (p === null || typeof p !== 'object')
+            throw new TypeError(`HeroSignal: preferences[${i}] bir nesne olmalı.`);
+        const category = requireString(p.category, `preferences[${i}].category`).trim();
+        if (category.length > 64)
+            throw new RangeError(`HeroSignal: preferences[${i}].category en fazla 64 karakter olmalı.`);
+        const channel = (_a = p.channel) !== null && _a !== void 0 ? _a : null;
+        if (channel !== null && !PREFERENCE_CHANNELS.includes(channel)) {
+            throw new TypeError(`HeroSignal: preferences[${i}].channel ${PREFERENCE_CHANNELS.join('|')} veya null olmalı.`);
+        }
+        if (typeof p.optedIn !== 'boolean')
+            throw new TypeError(`HeroSignal: preferences[${i}].optedIn boolean olmalı.`);
+        return { category, channel, optedIn: p.optedIn };
+    });
+}
+function textMap(value) {
+    const out = {};
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+        return out;
+    for (const [key, text] of Object.entries(value))
+        if (typeof text === 'string')
+            out[key] = text;
+    return out;
+}
+/** Native tercih yanıtını eksik alanlara karşı normalize eder (zamanlar epoch milisaniye). */
+function normalizePreferences(raw) {
+    const preferences = Array.isArray(raw === null || raw === void 0 ? void 0 : raw.preferences) ? raw.preferences : [];
+    const categories = Array.isArray(raw === null || raw === void 0 ? void 0 : raw.categories) ? raw.categories : [];
+    return {
+        preferences: preferences.map((p) => {
+            var _a, _b;
+            return ({
+                category: p.category,
+                channel: (_a = p.channel) !== null && _a !== void 0 ? _a : null,
+                optedIn: p.optedIn === true,
+                explicit: p.explicit === true,
+                source: (_b = p.source) !== null && _b !== void 0 ? _b : null,
+                updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : null,
+            });
+        }),
+        categories: categories.map((c) => ({
+            key: c.key,
+            name: textMap(c.name),
+            description: textMap(c.description),
+            channels: Array.isArray(c.channels) ? c.channels.filter((x) => typeof x === 'string') : null,
+            defaultOptedIn: c.defaultOptedIn !== false,
+        })),
+    };
+}
 /** Native bildirim nesnesini eksik alanlara karşı normalize eder. */
 function normalizeNotification(raw) {
     var _a, _b, _c, _d, _e, _f, _g;
@@ -81,6 +137,13 @@ class HeroSignalCore {
             removeSms: (phoneNumber) => this.bridge.call('removeSms', { phoneNumber: requireString(phoneNumber, 'phoneNumber') }),
             getExternalId: async () => { var _a; return (_a = (await this.bridge.call('getUser')).externalId) !== null && _a !== void 0 ? _a : null; },
             getId: async () => { var _a; return (_a = (await this.bridge.call('getUser')).id) !== null && _a !== void 0 ? _a : null; },
+            /**
+             * Kullanıcının kategori/kanal tercihleri ve app kategorileri (ADR-0019 §4); sahiplik kanıtı yerel SDK'da eklenir.
+             * Abonelik henüz yoksa `NOT_READY` koduyla reddedilir.
+             */
+            getPreferences: async () => normalizePreferences(await this.bridge.call('getPreferences')),
+            /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
+            setPreferences: async (preferences) => normalizePreferences(await this.bridge.call('setPreferences', { preferences: preferenceArgs(preferences) })),
             pushSubscription: {
                 getState: () => this.bridge.call('getPushSubscription'),
                 getId: async () => { var _a; return (_a = (await this.bridge.call('getPushSubscription')).id) !== null && _a !== void 0 ? _a : null; },
