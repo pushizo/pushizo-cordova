@@ -562,6 +562,39 @@ export class HeroSignalCore {
       (await this.bridge.call<{ unreadCount: number }>('inboxUnreadCount')).unreadCount ?? 0,
   };
 
+  // --- Konum (v2 Faz 17b) ---
+
+  /**
+   * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
+   * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
+   * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
+   * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
+   * reddedilir (web: Web SDK hatası).
+   */
+  readonly Location = {
+    /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
+    setShared: (shared: boolean): Promise<void> => this.bridge.call('setLocationShared', { shared: Boolean(shared) }),
+    /**
+     * Paylaşım açık mı (kalıcı tercih; izin durumundan bağımsız). Native SDK'larda özelliktir (`isShared`); köprü
+     * asenkron olduğundan burada Promise döndüren fonksiyondur.
+     */
+    isShared: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ shared: boolean } | undefined>('isLocationShared'))?.shared),
+    /**
+     * Konum iznini ister (Android `ACCESS_COARSE_LOCATION`/`ACCESS_FINE_LOCATION`, iOS "kullanırken"). İzin yoksa önce
+     * açıklama gösterilir (`rationale`; verilmezse SDK'nın yerelleştirilmiş metni), kullanıcı vazgeçerse sistem istemi
+     * açılmaz. Sonuç: izin varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false.
+     */
+    requestPermission: async (rationale?: string): Promise<boolean> => {
+      if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+        throw new TypeError('HeroSignal: rationale metin olmalı.');
+      }
+      const args: Record<string, unknown> = {};
+      if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
+      return Boolean((await this.bridge.call<{ permission: boolean }>('requestLocationPermission', args)).permission);
+    },
+  };
+
   // --- Live Activities (iOS) ---
 
   /**

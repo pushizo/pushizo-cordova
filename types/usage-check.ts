@@ -21,6 +21,10 @@ async function usage(): Promise<void> {
   await HeroSignal.LiveActivities.setupDefaultLiveActivity();
   const state: Record<string, HeroSignal.LiveActivityValue> = { status: 'Yolda', eta: 12, late: false };
   await window.HeroSignal.LiveActivities.startDefaultLiveActivity('order_42', { title: 'Sipariş #42' }, state);
+  const granted: boolean = await HeroSignal.Location.requestPermission('Yakındaki mağazaları göstermek için');
+  await window.HeroSignal.Location.setShared(granted);
+  const shared: boolean = await HeroSignal.Location.isShared();
+  void shared;
 }
 
 void usage;

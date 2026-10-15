@@ -55,6 +55,7 @@ final class HeroSignalBridgeCore: NSObject {
     fileprivate static weak var active: HeroSignalBridgeCore?
     private static var listenersRegistered = false
     private static let maxPendingForeground = 32
+    private static let notInitialized = "Önce HeroSignal.initialize çağrılmalı"
 
     private let emit: (String, [String: Any]) -> Void
     /// JS tarafında ön plan dinleyicisi varsa gösterim JS kararına bırakılır.
@@ -280,6 +281,16 @@ final class HeroSignalBridgeCore: NSObject {
             inbox(reply) { try await HeroSignal.Inbox.archive(id); return nil }
         case "inboxUnreadCount":
             inbox(reply) { ["unreadCount": try await HeroSignal.Inbox.unreadCount()] }
+
+        // Konum (v2 Faz 17b; yalnızca ön plan): yerel SDK başlatılmadan çağrılırsa sessizce yok sayılmaz, NOT_READY döner.
+        case "setLocationShared":
+            guard HeroSignal.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            HeroSignal.Location.setShared(args["shared"] as? Bool ?? false); ok()
+        case "isLocationShared": ok(["shared": HeroSignal.Location.isShared])
+        case "requestLocationPermission":
+            guard HeroSignal.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            // Açıklama uyarısı + `requestWhenInUseAuthorization`; sonuç ana iş parçacığında döner.
+            HeroSignal.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }
 
         // Live Activities (ADR-0024): genel `HeroSignalDefaultLiveActivityAttributes` türü; değer doğrulaması yerel SDK'dadır.
         case "setupDefaultLiveActivity":

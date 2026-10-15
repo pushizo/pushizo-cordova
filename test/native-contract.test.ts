@@ -20,7 +20,7 @@ function facadeMethods(): Set<string> {
 describe('native sözleşme', () => {
   const methods = facadeMethods();
   // Adaptörde (Activity/izin API'si) ele alınanlar.
-  const adapterHandled = new Set(['requestPermission']);
+  const adapterHandled = new Set(['requestPermission', 'requestLocationPermission']);
 
   it('cephe beklenen metot kümesini kullanır', () => {
     expect(methods.size).toBeGreaterThan(30);
@@ -88,6 +88,35 @@ describe('native sözleşme', () => {
     expect(kt).toContain('"startDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE');
     expect(kt).toContain('LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"');
     expect(kt).toContain('Live Activities yalnızca iOS\'ta desteklenir');
+  });
+
+  it('Konum: native SDK Location çağrılarına bağlı; Android izni manifest, açıklama ve cordova.requestPermissions akışıyla ister', () => {
+    for (const m of ['setLocationShared', 'isLocationShared', 'requestLocationPermission']) expect(methods.has(m), m).toBe(true);
+    const kt = read('src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt');
+    expect(kt).toContain('HeroSignal.Location.setShared(args.optBoolean("shared", false))');
+    expect(kt).toContain('"isLocationShared" -> reply.success(JSONObject().put("shared", HeroSignal.Location.isShared))');
+    expect(kt).toContain('JSONObject().put("permission", HeroSignal.Location.permissionGranted)');
+    expect(kt).toContain('HeroSignal.Location.onPermissionResult()');
+    // Yalnızca uygulama manifest'inde tanımlı konum izinleri istenir; arka plan konumu yok.
+    expect(kt).toContain('PackageManager.GET_PERMISSIONS');
+    expect(kt).toContain('arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)');
+    expect(kt).not.toContain('ACCESS_BACKGROUND_LOCATION');
+    // Açıklama diyaloğu SDK string kaynaklarıyla; "Şimdi değil"/iptal false döner.
+    for (const key of ['title', 'message', 'continue', 'not_now']) {
+      expect(kt).toContain(`com.herosignal.sdk.R.string.hs_location_rationale_${key}`);
+    }
+    expect(kt).toContain('.setOnCancelListener { reply.success(locationPermissionJson()) }');
+    const plugin = read('src/android/com/herosignal/cordova/HeroSignalCordovaPlugin.kt');
+    expect(plugin).toContain('core.requestLocationPermission(cordova.activity, args, reply(callbackContext))');
+    expect(plugin).toContain('cordova.requestPermissions(this, HeroSignal.Location.PERMISSION_REQUEST_CODE, permissions)');
+    expect(plugin).toContain('HeroSignal.Location.PERMISSION_REQUEST_CODE -> {');
+    expect(plugin).toContain('val result = core.onLocationPermissionResult()');
+    // Eklenti konum iznini manifest'e otomatik eklemez (README "Konum").
+    expect(read('plugin.xml')).not.toMatch(/ACCESS_(COARSE|FINE|BACKGROUND)_LOCATION/);
+    const swift = read('src/ios/HeroSignalBridgeCore.swift');
+    expect(swift).toContain('HeroSignal.Location.setShared(args["shared"] as? Bool ?? false)');
+    expect(swift).toContain('case "isLocationShared": ok(["shared": HeroSignal.Location.isShared])');
+    expect(swift).toContain('HeroSignal.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }');
   });
 
   it('plugin.xml dosya başvuruları mevcut', () => {

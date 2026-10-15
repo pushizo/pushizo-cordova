@@ -2,6 +2,7 @@ package com.herosignal.cordova
 
 import android.Manifest
 import android.os.Build
+import com.herosignal.sdk.HeroSignal
 import org.apache.cordova.CallbackContext
 import org.apache.cordova.CordovaPlugin
 import org.apache.cordova.PluginResult
@@ -19,6 +20,7 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
     private var eventCallback: CallbackContext? = null
     private val bufferedEvents = ArrayDeque<JSONObject>()
     private var pendingPermission: CallbackContext? = null
+    private var pendingLocationPermission: CallbackContext? = null
 
     override fun pluginInitialize() {
         core = HeroSignalBridgeCore(cordova.activity.applicationContext) { type, payload -> sendEvent(type, payload) }
@@ -29,6 +31,7 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
         when (action) {
             "setEventCallback" -> openEventChannel(callbackContext)
             "requestPermission" -> requestPermission(callbackContext)
+            "requestLocationPermission" -> requestLocationPermission(args.optJSONObject(0) ?: JSONObject(), callbackContext)
             else -> return core.handle(action, args.optJSONObject(0) ?: JSONObject(), reply(callbackContext))
         }
         return true
@@ -87,12 +90,34 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
         cordova.requestPermission(this, PERMISSION_REQUEST_CODE, Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    /**
+     * Konum izni (v2 Faz 17b): açıklama diyaloğu ve manifest denetimi [HeroSignalBridgeCore] içindedir; "Devam" seçilirse
+     * sistem izni `HeroSignal.Location.PERMISSION_REQUEST_CODE` ile istenir, sonuç [onRequestPermissionsResult] ile döner.
+     */
+    private fun requestLocationPermission(args: JSONObject, callbackContext: CallbackContext) {
+        core.requestLocationPermission(cordova.activity, args, reply(callbackContext)) { permissions ->
+            // Yanıtsız kalan önceki istek güncel izin durumuyla kapatılır.
+            val previous = synchronized(lock) { pendingLocationPermission.also { pendingLocationPermission = callbackContext } }
+            previous?.success(core.locationPermissionJson())
+            cordova.requestPermissions(this, HeroSignal.Location.PERMISSION_REQUEST_CODE, permissions)
+        }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        if (requestCode != PERMISSION_REQUEST_CODE) return
-        core.onPermissionResult()
-        val callback = synchronized(lock) { pendingPermission.also { pendingPermission = null } } ?: return
-        // Sonuç sistem durumundan okunur (izin verilse de bildirimler uygulama ayarından kapalı olabilir).
-        callback.success(core.permissionJson())
+        when (requestCode) {
+            PERMISSION_REQUEST_CODE -> {
+                core.onPermissionResult()
+                val callback = synchronized(lock) { pendingPermission.also { pendingPermission = null } } ?: return
+                // Sonuç sistem durumundan okunur (izin verilse de bildirimler uygulama ayarından kapalı olabilir).
+                callback.success(core.permissionJson())
+            }
+            HeroSignal.Location.PERMISSION_REQUEST_CODE -> {
+                // SDK bilgilendirilir (izin verildiyse ve paylaşım açıksa konum gönderilir); sonuç sistem durumundan okunur.
+                val result = core.onLocationPermissionResult()
+                val callback = synchronized(lock) { pendingLocationPermission.also { pendingLocationPermission = null } } ?: return
+                callback.success(result)
+            }
+        }
     }
 
     // --- Yaşam döngüsü ---
