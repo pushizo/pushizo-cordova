@@ -16,7 +16,9 @@ import type {
   InboxListOptions,
   InboxPage,
   InitializeOptions,
+  LiveActivityValue,
   LogLevel,
+  LoginOptions,
   NotificationClickEvent,
   PermissionChangeEvent,
   PreferenceChannel,
@@ -75,6 +77,39 @@ function stringRecord(input: Record<string, unknown>, name: string): Record<stri
       throw new TypeError(`HeroSignal: ${name}.${key} metin, sayı veya boolean olmalı.`);
     }
     out[key] = String(value);
+  }
+  return out;
+}
+
+/** Live Activity etkinlik kimliği: iOS SDK ve sunucu `start` kuralı (1-100 karakter; harf, rakam ve `_ . : -`). */
+const LIVE_ACTIVITY_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
+const MAX_LIVE_ACTIVITY_KEY_LENGTH = 64;
+/** Sunucunun uzaktan başlatmada `attributes` içine eklediği ayrılmış anahtar. */
+const RESERVED_LIVE_ACTIVITY_KEY = 'herosignal';
+
+function liveActivityId(value: unknown): string {
+  if (typeof value !== 'string' || !LIVE_ACTIVITY_ID.test(value)) {
+    throw new TypeError('HeroSignal: activityId 1-100 karakter olmalı (harf, rakam ve _ . : -).');
+  }
+  return value;
+}
+
+/** Düz nesne; anahtar 1-64 karakter, değer metin / sonlu sayı / boolean (native SDK ile aynı kurallar). */
+function liveActivityValues(input: unknown, name: string, reservedKey?: string): Record<string, LiveActivityValue> {
+  const proto: unknown = input !== null && typeof input === 'object' ? Object.getPrototypeOf(input) : undefined;
+  if (Array.isArray(input) || (proto !== Object.prototype && proto !== null)) {
+    throw new TypeError(`HeroSignal: ${name} düz bir nesne olmalı.`);
+  }
+  const out: Record<string, LiveActivityValue> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (key.length < 1 || key.length > MAX_LIVE_ACTIVITY_KEY_LENGTH) {
+      throw new TypeError(`HeroSignal: ${name} anahtarları 1-${MAX_LIVE_ACTIVITY_KEY_LENGTH} karakter olmalı.`);
+    }
+    if (key === reservedKey) throw new TypeError(`HeroSignal: ${name} içinde '${reservedKey}' anahtarı ayrılmıştır.`);
+    if (typeof value !== 'string' && typeof value !== 'boolean' && !(typeof value === 'number' && Number.isFinite(value))) {
+      throw new TypeError(`HeroSignal: ${name}.${key} metin, sonlu sayı veya boolean olmalı.`);
+    }
+    out[key] = value;
   }
   return out;
 }
@@ -324,14 +359,25 @@ export class HeroSignalCore {
     return this.bridge.call('setConsentGiven', { given: Boolean(given) });
   }
 
-  /** Anonim kullanıcıyı kimlikli kullanıcıya bağlar; identity verification açıksa `identityHash` zorunludur. */
-  login(externalId: string, identityHash?: string): Promise<void> {
+  /**
+   * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
+   * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+   */
+  login(externalId: string, proof?: string | LoginOptions): Promise<void> {
     requireString(externalId, 'externalId');
+    const { identityHash, jwt }: LoginOptions = typeof proof === 'string' ? { identityHash: proof } : (proof ?? {});
     const args: Record<string, unknown> = { externalId };
     if (identityHash !== undefined && identityHash !== null) args.identityHash = requireString(identityHash, 'identityHash');
+    if (jwt !== undefined && jwt !== null) args.jwt = requireString(jwt, 'jwt');
     return this.bridge.call('login', args);
   }
 
+  /** Süresi dolan kimlik JWT'sini yeniler (giriş yapmış kullanıcı için); sonraki SDK istekleri yeni belirteci taşır. */
+  updateUserJwt(jwt: string): Promise<void> {
+    return this.bridge.call('updateUserJwt', { jwt: requireString(jwt, 'jwt') });
+  }
+
+  /** Kullanıcıyı anonim kullanıcıya döndürür; kimlik JWT'si cihazdan silinir. */
   logout(): Promise<void> {
     return this.bridge.call('logout');
   }
@@ -514,6 +560,35 @@ export class HeroSignalCore {
     archive: (id: string): Promise<void> => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
     unreadCount: async (): Promise<number> =>
       (await this.bridge.call<{ unreadCount: number }>('inboxUnreadCount')).unreadCount ?? 0,
+  };
+
+  // --- Live Activities (iOS) ---
+
+  /**
+   * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır;
+   * widget extension'da bu türle `ActivityConfiguration` tanımlanmalı ve sunucuda tür adı aynen kaydedilmelidir.
+   * Android ve web `PLATFORM_NOT_SUPPORTED` koduyla reddeder.
+   */
+  readonly LiveActivities = {
+    /**
+     * Genel türü izlemeye alır: push-to-start belirteci (iOS 17.2+) ve başlayan her etkinliğin güncelleme belirteci
+     * sunucuya kaydedilir. `initialize`'dan sonra, uygulama her açıldığında çağrılmalıdır.
+     */
+    setupDefaultLiveActivity: (): Promise<void> => this.bridge.call('setupDefaultLiveActivity'),
+    /**
+     * Genel türle yerel bir etkinlik başlatır (iOS 16.1+); sunucu sonraki `update`/`end` çağrılarını `activityId` ile
+     * yapar. `attributes` içinde `herosignal` anahtarı ayrılmıştır.
+     */
+    startDefaultLiveActivity: (
+      activityId: string,
+      attributes: Record<string, LiveActivityValue>,
+      contentState: Record<string, LiveActivityValue>,
+    ): Promise<void> =>
+      this.bridge.call('startDefaultLiveActivity', {
+        activityId: liveActivityId(activityId),
+        attributes: liveActivityValues(attributes, 'attributes', RESERVED_LIVE_ACTIVITY_KEY),
+        contentState: liveActivityValues(contentState, 'contentState'),
+      }),
   };
 
   // --- Hata ayıklama ---

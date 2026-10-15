@@ -13,6 +13,16 @@ export interface InitializeOptions {
   logLevel?: LogLevel;
 }
 
+/**
+ * `HeroSignal.login` kimlik kanıtı (ADR-0023 §9). App'in `identity_verification_mode` ayarına göre HMAC
+ * `identityHash` ve/veya sunucunuzda imzalanmış ES256 `jwt` (`sub` = externalId, `aud` = appId) verilir.
+ */
+export interface LoginOptions {
+  identityHash?: string;
+  /** SDK isteklerinde `Authorization: Bearer` başlığıyla gider; süresi dolunca `updateUserJwt` ile yenilenir. */
+  jwt?: string;
+}
+
 /** Bildirim içeriği (native `HsNotification` / `HSNotification`). */
 export interface HeroSignalNotification {
   title: string | null;
@@ -144,6 +154,12 @@ export interface PreferenceInput {
 }
 
 export type InAppTriggerValue = string | number | boolean;
+
+/**
+ * iOS Live Activity alan değeri (`HeroSignalDefaultLiveActivityAttributes.data` / `ContentState.data`): metin, sonlu
+ * sayı veya mantıksal değer.
+ */
+export type LiveActivityValue = string | number | boolean;
 
 /** Native katmanın gönderdiği ham ön plan olayı. */
 export interface RawForegroundEvent {

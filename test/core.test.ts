@@ -69,6 +69,74 @@ describe('HeroSignalCore', () => {
     ]);
   });
 
+  it('JWT identity verification: login seçenekleri ve updateUserJwt köprüye iletilir', async () => {
+    const f = fakeBridge();
+    const hs = new HeroSignalCore(f.bridge);
+    await hs.login('user_1', { jwt: 'a.b.c' });
+    await hs.login('user_2', { identityHash: 'hash', jwt: 'a.b.c' });
+    await hs.updateUserJwt('d.e.f');
+    expect(f.calls).toEqual([
+      { method: 'login', args: { externalId: 'user_1', jwt: 'a.b.c' } },
+      { method: 'login', args: { externalId: 'user_2', identityHash: 'hash', jwt: 'a.b.c' } },
+      { method: 'updateUserJwt', args: { jwt: 'd.e.f' } },
+    ]);
+    expect(() => hs.login('user_1', { jwt: ' ' })).toThrow(TypeError);
+    expect(() => hs.updateUserJwt('')).toThrow(TypeError);
+  });
+
+  it('Live Activities: argümanlar köprüye iletilir', async () => {
+    const f = fakeBridge();
+    const hs = new HeroSignalCore(f.bridge);
+    await hs.LiveActivities.setupDefaultLiveActivity();
+    await hs.LiveActivities.startDefaultLiveActivity(
+      'order_42:a-b.c',
+      { title: 'Sipariş #42', count: 2 },
+      { status: 'Yolda', eta: 12.5, late: false },
+    );
+    expect(f.calls).toEqual([
+      { method: 'setupDefaultLiveActivity', args: undefined },
+      {
+        method: 'startDefaultLiveActivity',
+        args: {
+          activityId: 'order_42:a-b.c',
+          attributes: { title: 'Sipariş #42', count: 2 },
+          contentState: { status: 'Yolda', eta: 12.5, late: false },
+        },
+      },
+    ]);
+  });
+
+  it('Live Activities: geçersiz kimlik, anahtar ve değerler köprüye gitmeden reddedilir', () => {
+    const f = fakeBridge();
+    const hs = new HeroSignalCore(f.bridge);
+    const start = hs.LiveActivities.startDefaultLiveActivity;
+    expect(() => start('', {}, {})).toThrow(/activityId/);
+    expect(() => start('a'.repeat(101), {}, {})).toThrow(/activityId/);
+    expect(() => start('order 42', {}, {})).toThrow(/activityId/);
+    expect(() => start('order_42', { herosignal: 'x' }, {})).toThrow(/herosignal/);
+    expect(() => start('order_42', { ['k'.repeat(65)]: 'x' }, {})).toThrow(TypeError);
+    expect(() => start('order_42', { '': 'x' }, {})).toThrow(TypeError);
+    expect(() => start('order_42', {}, { eta: Number.NaN })).toThrow(/contentState\.eta/);
+    expect(() => start('order_42', {}, { eta: Number.POSITIVE_INFINITY })).toThrow(TypeError);
+    expect(() => start('order_42', { nested: { a: 1 } as never }, {})).toThrow(/attributes\.nested/);
+    expect(() => start('order_42', { x: null as never }, {})).toThrow(TypeError);
+    expect(() => start('order_42', [] as never, {})).toThrow(/attributes/);
+    expect(() => start('order_42', {}, null as never)).toThrow(/contentState/);
+    // `herosignal` yalnızca attributes içinde ayrılmıştır.
+    expect(() => start('order_42', {}, { herosignal: 'x' })).not.toThrow();
+    expect(f.calls.map((c) => c.method)).toEqual(['startDefaultLiveActivity']);
+  });
+
+  it('Live Activities: native hata kodu (ör. Android PLATFORM_NOT_SUPPORTED) Promise reddiyle yüzeye çıkar', async () => {
+    const error = Object.assign(new Error('Live Activities yalnızca iOS\'ta desteklenir'), { code: 'PLATFORM_NOT_SUPPORTED' });
+    const bridge: Bridge = { call: vi.fn(async () => Promise.reject(error)), subscribe: vi.fn() };
+    const hs = new HeroSignalCore(bridge);
+    await expect(hs.LiveActivities.setupDefaultLiveActivity()).rejects.toMatchObject({ code: 'PLATFORM_NOT_SUPPORTED' });
+    await expect(hs.LiveActivities.startDefaultLiveActivity('order_42', {}, {})).rejects.toMatchObject({
+      code: 'PLATFORM_NOT_SUPPORTED',
+    });
+  });
+
   it('tag/tetik değerleri metne çevrilir, null değerler atlanır, nesne reddedilir', async () => {
     const f = fakeBridge({ getTags: { tags: { plan: 'pro' } }, getTriggers: { triggers: { level: '3' } } });
     const hs = new HeroSignalCore(f.bridge);

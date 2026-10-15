@@ -94,6 +94,7 @@ class HeroSignalCordovaPlugin: CDVPlugin {
     @objc(initialize:) func initializeSdk(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setConsentGiven:) func setConsentGiven(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(login:) func login(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(updateUserJwt:) func updateUserJwt(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(logout:) func logout(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(addTags:) func addTags(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(removeTags:) func removeTags(_ command: CDVInvokedUrlCommand) { dispatch(command) }
@@ -133,4 +134,6 @@ class HeroSignalCordovaPlugin: CDVPlugin {
     @objc(inboxMarkAllRead:) func inboxMarkAllRead(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxArchive:) func inboxArchive(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxUnreadCount:) func inboxUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setupDefaultLiveActivity:) func setupDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

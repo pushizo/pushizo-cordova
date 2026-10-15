@@ -1,4 +1,4 @@
-import type { ForegroundWillDisplayEvent, HeroSignalNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LogLevel, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ForegroundWillDisplayEvent, HeroSignalNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -41,8 +41,14 @@ export declare class HeroSignalCore {
     initialize(appIdOrOptions: string | InitializeOptions, options?: Omit<InitializeOptions, 'appId'>): Promise<void>;
     /** KVKK/GDPR onayı (`requiresPrivacyConsent: true` ile başlatıldıysa). */
     setConsentGiven(given: boolean): Promise<void>;
-    /** Anonim kullanıcıyı kimlikli kullanıcıya bağlar; identity verification açıksa `identityHash` zorunludur. */
-    login(externalId: string, identityHash?: string): Promise<void>;
+    /**
+     * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
+     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+     */
+    login(externalId: string, proof?: string | LoginOptions): Promise<void>;
+    /** Süresi dolan kimlik JWT'sini yeniler (giriş yapmış kullanıcı için); sonraki SDK istekleri yeni belirteci taşır. */
+    updateUserJwt(jwt: string): Promise<void>;
+    /** Kullanıcıyı anonim kullanıcıya döndürür; kimlik JWT'si cihazdan silinir. */
     logout(): Promise<void>;
     readonly User: {
         addTag: (key: string, value: InAppTriggerValue) => Promise<void>;
@@ -137,6 +143,23 @@ export declare class HeroSignalCore {
         /** Öğeyi kutudan kaldırır (sunucuda arşivlenir). */
         archive: (id: string) => Promise<void>;
         unreadCount: () => Promise<number>;
+    };
+    /**
+     * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır;
+     * widget extension'da bu türle `ActivityConfiguration` tanımlanmalı ve sunucuda tür adı aynen kaydedilmelidir.
+     * Android ve web `PLATFORM_NOT_SUPPORTED` koduyla reddeder.
+     */
+    readonly LiveActivities: {
+        /**
+         * Genel türü izlemeye alır: push-to-start belirteci (iOS 17.2+) ve başlayan her etkinliğin güncelleme belirteci
+         * sunucuya kaydedilir. `initialize`'dan sonra, uygulama her açıldığında çağrılmalıdır.
+         */
+        setupDefaultLiveActivity: () => Promise<void>;
+        /**
+         * Genel türle yerel bir etkinlik başlatır (iOS 16.1+); sunucu sonraki `update`/`end` çağrılarını `activityId` ile
+         * yapar. `attributes` içinde `herosignal` anahtarı ayrılmıştır.
+         */
+        startDefaultLiveActivity: (activityId: string, attributes: Record<string, LiveActivityValue>, contentState: Record<string, LiveActivityValue>) => Promise<void>;
     };
     readonly Debug: {
         setLogLevel: (level: LogLevel) => Promise<void>;
