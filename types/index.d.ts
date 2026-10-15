@@ -11,6 +11,7 @@ declare const HeroSignal: HeroSignalCore;
 declare namespace HeroSignal {
   type LogLevel = Definitions.LogLevel;
   type InitializeOptions = Definitions.InitializeOptions;
+  type LoginOptions = Definitions.LoginOptions;
   type HeroSignalNotification = Definitions.HeroSignalNotification;
   type NotificationClickEvent = Definitions.NotificationClickEvent;
   type ForegroundWillDisplayEvent = Definitions.ForegroundWillDisplayEvent;
@@ -20,6 +21,7 @@ declare namespace HeroSignal {
   type InAppLifecycleEvent = Definitions.InAppLifecycleEvent;
   type InAppLifecycleListener = Definitions.InAppLifecycleListener;
   type InAppTriggerValue = Definitions.InAppTriggerValue;
+  type LiveActivityValue = Definitions.LiveActivityValue;
   type InboxItem = Definitions.InboxItem;
   type InboxPage = Definitions.InboxPage;
   type InboxListOptions = Definitions.InboxListOptions;

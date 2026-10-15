@@ -39,6 +39,68 @@ document.addEventListener('deviceready', async () => {
 
 Tüm metotlar Promise döndürür. Hatalar `HeroSignalError` örneğidir ve `code` alanı taşır: `INVALID_ARGUMENT`, `NOT_READY`, `NOT_FOUND`, `NOT_IMPLEMENTED` veya sunucu hata kodu.
 
+### JWT ile kimlik doğrulama
+
+App ayarlarında kimlik doğrulama kipi (`identity_verification_mode`) `jwt` veya `both` ise kullanıcı, sunucunuzda
+imzalanmış kısa ömürlü bir ES256 JWT ile kimliklendirilir (ADR-0023 §9; talepler: `sub` = external_id, `aud` = app_id, `exp`/`iat` zorunlu, en çok 24 saat, yalnızca ES256).
+
+```js
+await HeroSignal.login('user_42', { jwt: jwtFromBackend });                  // yalnızca JWT
+await HeroSignal.login('user_42', { identityHash: hmac, jwt: jwtFromBackend }); // both kipinde ikisi birlikte
+await HeroSignal.updateUserJwt(refreshedJwt); // süresi dolmadan yenileyin
+await HeroSignal.logout();
+```
+
+- JWT yerel SDK'da identity hash ile aynı kalıcı depoda saklanır ve tüm `/sdk/v1/...` isteklerinde
+  `Authorization: Bearer <jwt>` başlığıyla gider; gövdeye/URL'ye yazılmaz, loglanmaz. `logout` belirteci siler.
+- `/config` yanıtında `identity_verification_required` true ise login öncesi kanıt denetlenir: `jwt` kipinde JWT, `hmac`
+  kipinde `identityHash` zorunludur, `both` kipinde biri yeter; eksikse `login` `NOT_READY` ile reddedilir. Alan gelmeyen
+  eski sunucularda kip `hmac` sayılır; ikinci argümanı metin olan eski `login(id, identityHash)` çağrıları aynen çalışır.
+- `updateUserJwt` giriş yapılmamışsa `NOT_READY` ile reddedilir; başarıda kuyrukta bekleyen işlemler yeni belirteçle
+  yeniden denenir.
+
+### Live Activities (iOS)
+
+Köprü, iOS SDK'nın genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır (ADR-0024; ayrıntı
+`docs/sdk/ios.md` "Live Activities"). Sunucu etkinliği uzaktan başlatır (push-to-start, iOS 17.2+), günceller ve bitirir;
+yerel başlatma iOS 16.1+ ister.
+
+```js
+await HeroSignal.initialize('app_xxx');
+await HeroSignal.LiveActivities.setupDefaultLiveActivity(); // her açılışta: belirteçler sunucuya kaydedilir
+await HeroSignal.LiveActivities.startDefaultLiveActivity(
+  'order_42',                       // 1-100 karakter: harf, rakam, _ . : -
+  { title: 'Sipariş #42' },         // attributes ('herosignal' anahtarı ayrılmıştır)
+  { status: 'Yolda', eta: 12 },     // contentState
+);
+```
+
+- Değerler metin, sonlu sayı veya boolean; anahtarlar 1-64 karakter. Kurala uymayan girdi köprüye gitmeden `TypeError`/
+  `RangeError` fırlatır.
+- Hata kodları (`HeroSignalError.code`): `PLATFORM_NOT_SUPPORTED` (iOS 16.1 öncesi; Android'de her zaman), `NOT_READY`
+  (`initialize` yok), `INVALID_ARGUMENT`, `LIVE_ACTIVITY_FAILED` (Live Activities kapalı, `NSSupportsLiveActivities` yok,
+  sistem sınırı).
+- Xcode: uygulamanın Info.plist'ine `NSSupportsLiveActivities = YES` ekleyin; **Widget Extension** hedefi oluşturun ve
+  hedefe SPM'de `HeroSignalExtension` ürününü (`import HeroSignalExtension`), CocoaPods'ta `pod 'HeroSignal/Extension'`
+  (`import HeroSignal`) ekleyin:
+
+```swift
+ActivityConfiguration(for: HeroSignalDefaultLiveActivityAttributes.self) { context in
+    VStack {
+        Text(context.attributes.data["title"]?.stringValue ?? "")
+        Text(context.state.data["status"]?.description ?? "")
+    }
+} dynamicIsland: { context in
+    DynamicIsland { DynamicIslandExpandedRegion(.center) { Text(context.state.data["status"]?.description ?? "") } }
+        compactLeading: { EmptyView() } compactTrailing: { Text(context.state.data["eta"]?.description ?? "") } minimal: { EmptyView() }
+}
+```
+
+- Dashboard'da (**Live Activities**) veya API'de tür adı tam olarak `HeroSignalDefaultLiveActivityAttributes` olmalıdır.
+  Sunucu: `POST /v1/apps/{appId}/live-activities/HeroSignalDefaultLiveActivityAttributes/start` (`activity_id`,
+  `attributes`, `content_state`, `target`), `…/update` ve `…/end` (`activity_id`, `content_state`).
+- Tip-güvenli kendi türünüz için native tarafta `HeroSignal.LiveActivities.register(MyAttributes.self)` kullanın.
+
 ### Olaylar
 
 ```js

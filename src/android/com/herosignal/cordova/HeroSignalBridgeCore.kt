@@ -141,7 +141,11 @@ internal class HeroSignalBridgeCore(
                     reply.success(null)
                 }
                 "setConsentGiven" -> { HeroSignal.setConsentGiven(args.optBoolean("given", false)); reply.success(null) }
-                "login" -> { HeroSignal.login(args.requireString("externalId"), args.optStringOrNull("identityHash")); reply.success(null) }
+                "login" -> {
+                    HeroSignal.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    reply.success(null)
+                }
+                "updateUserJwt" -> { HeroSignal.updateUserJwt(args.requireString("jwt")); reply.success(null) }
                 "logout" -> { HeroSignal.logout(); reply.success(null) }
 
                 "addTags" -> { HeroSignal.User.addTags(args.stringMap("tags")); reply.success(null) }
@@ -212,6 +216,10 @@ internal class HeroSignalBridgeCore(
                 "inboxMarkAllRead" -> HeroSignal.Inbox.markAllRead(callback(reply) { JSONObject().put("unreadCount", it) })
                 "inboxArchive" -> HeroSignal.Inbox.archive(args.requireString("id"), callback(reply) { null })
                 "inboxUnreadCount" -> HeroSignal.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
+
+                // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
+                "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
+                "startDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
                 else -> return false
             }
         } catch (e: IllegalArgumentException) {
@@ -242,6 +250,8 @@ internal class HeroSignalBridgeCore(
 
     companion object {
         private const val MAX_PENDING_FOREGROUND = 32
+        private const val LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"
+        private const val LIVE_ACTIVITY_UNSUPPORTED_MESSAGE = "Live Activities yalnızca iOS'ta desteklenir"
 
         fun logLevel(name: String?): HsLog.Level = when (name) {
             "none" -> HsLog.Level.NONE

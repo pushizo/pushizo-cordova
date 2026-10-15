@@ -64,6 +64,32 @@ describe('native sözleşme', () => {
     expect(swift).not.toMatch(/case "removeNotification": ok\(\)/);
   });
 
+  it('JWT identity verification native SDK çağrılarına iletilir', () => {
+    expect(methods.has('updateUserJwt')).toBe(true);
+    const kt = read('src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt');
+    expect(kt).toContain('HeroSignal.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))');
+    expect(kt).toContain('HeroSignal.updateUserJwt(args.requireString("jwt"))');
+    const swift = read('src/ios/HeroSignalBridgeCore.swift');
+    expect(swift).toContain('HeroSignal.login(externalId, identityHash: identityHash, jwt: jwt)');
+    expect(swift).toContain('try HeroSignal.updateUserJwt(jwt)');
+  });
+
+  it('Live Activities iOS SDK çağrılarına bağlı, Android PLATFORM_NOT_SUPPORTED ile reddeder', () => {
+    expect(methods.has('setupDefaultLiveActivity')).toBe(true);
+    expect(methods.has('startDefaultLiveActivity')).toBe(true);
+    const swift = read('src/ios/HeroSignalBridgeCore.swift');
+    expect(swift).toContain('try HeroSignal.LiveActivities.setupDefaultLiveActivity()');
+    expect(swift).toContain('try HeroSignal.LiveActivities.startDefaultLiveActivity(activityId:');
+    expect(swift).toContain('catch let error as HSLiveActivityError');
+    expect(swift).toContain('reply(.failure(code: error.code, message: error.message))');
+    expect(swift).toContain('"LIVE_ACTIVITY_FAILED"');
+    const kt = read('src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt');
+    expect(kt).toContain('"setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE');
+    expect(kt).toContain('"startDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE');
+    expect(kt).toContain('LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"');
+    expect(kt).toContain('Live Activities yalnızca iOS\'ta desteklenir');
+  });
+
   it('plugin.xml dosya başvuruları mevcut', () => {
     const xml = read('plugin.xml');
     const refs = [...xml.matchAll(/<(?:js-module|source-file|framework)[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]).filter((s) => !s.includes(':'));
