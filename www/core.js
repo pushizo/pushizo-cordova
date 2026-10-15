@@ -302,6 +302,37 @@ class HeroSignalCore {
             archive: (id) => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
             unreadCount: async () => { var _a; return (_a = (await this.bridge.call('inboxUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
         };
+        // --- Konum (v2 Faz 17b) ---
+        /**
+         * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
+         * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
+         * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
+         * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
+         * reddedilir (web: Web SDK hatası).
+         */
+        this.Location = {
+            /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
+            setShared: (shared) => this.bridge.call('setLocationShared', { shared: Boolean(shared) }),
+            /**
+             * Paylaşım açık mı (kalıcı tercih; izin durumundan bağımsız). Native SDK'larda özelliktir (`isShared`); köprü
+             * asenkron olduğundan burada Promise döndüren fonksiyondur.
+             */
+            isShared: async () => { var _a; return Boolean((_a = (await this.bridge.call('isLocationShared'))) === null || _a === void 0 ? void 0 : _a.shared); },
+            /**
+             * Konum iznini ister (Android `ACCESS_COARSE_LOCATION`/`ACCESS_FINE_LOCATION`, iOS "kullanırken"). İzin yoksa önce
+             * açıklama gösterilir (`rationale`; verilmezse SDK'nın yerelleştirilmiş metni), kullanıcı vazgeçerse sistem istemi
+             * açılmaz. Sonuç: izin varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false.
+             */
+            requestPermission: async (rationale) => {
+                if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+                    throw new TypeError('HeroSignal: rationale metin olmalı.');
+                }
+                const args = {};
+                if (typeof rationale === 'string' && rationale.trim() !== '')
+                    args.rationale = rationale;
+                return Boolean((await this.bridge.call('requestLocationPermission', args)).permission);
+            },
+        };
         // --- Live Activities (iOS) ---
         /**
          * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır;

@@ -136,4 +136,7 @@ class HeroSignalCordovaPlugin: CDVPlugin {
     @objc(inboxUnreadCount:) func inboxUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setupDefaultLiveActivity:) func setupDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setLocationShared:) func setLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(isLocationShared:) func isLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(requestLocationPermission:) func requestLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

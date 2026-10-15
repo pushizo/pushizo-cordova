@@ -7,6 +7,7 @@ HeroSignal'in Cordova eklentisi. Native HeroSignal Android (`com.herosignal:hero
 - Bildirim tıklaması (soğuk başlatma dahil), ön plan gösterimini engelleme/erteleme
 - Kullanıcı: `login`/`logout` (`identityHash`), tag, alias, dil, e-posta ve SMS aboneliği
 - In-app mesajlar (tetik, ekran, duraklatma, tıklama ve yaşam döngüsü olayları; native çizim)
+- Konum paylaşımı (yalnızca ön plan, açıklama + izin istemi)
 - Bildirim kutusu, özel olay, KVKK/GDPR gizlilik onayı, günlük seviyesi, bildirim tepsisini temizleme
 
 ## Kurulum
@@ -100,6 +101,48 @@ ActivityConfiguration(for: HeroSignalDefaultLiveActivityAttributes.self) { conte
   Sunucu: `POST /v1/apps/{appId}/live-activities/HeroSignalDefaultLiveActivityAttributes/start` (`activity_id`,
   `attributes`, `content_state`, `target`), `…/update` ve `…/end` (`activity_id`, `content_state`).
 - Tip-güvenli kendi türünüz için native tarafta `HeroSignal.LiveActivities.register(MyAttributes.self)` kullanın.
+
+### Konum
+
+Kullanıcı izin verirse cihazın konumu push aboneliğine yazılır (v2 Faz 17b); segmentlerde konuma göre hedefleme için
+kullanılır. Paylaşım **yalnızca ön planda** çalışır (arka plan konumu yok): native SDK konumu oturum başında ve uygulama
+ön plana döndüğünde en sık 5 dakikada bir gönderir. İzin yoksa veya gizlilik onayı (`requiresPrivacyConsent`)
+verilmemişse hiçbir şey gönderilmez; tercih kalıcıdır.
+
+```js
+const granted = await HeroSignal.Location.requestPermission('Yakındaki mağazaları göstermek için konumunuzu kullanırız.');
+if (granted) await HeroSignal.Location.setShared(true);
+const shared = await HeroSignal.Location.isShared();         // kalıcı tercih (izin durumundan bağımsız)
+await HeroSignal.Location.setShared(false);                  // paylaşımı kapatır, sunucudaki konumu siler
+```
+
+- `requestPermission(rationale?)`: izin yoksa önce açıklama gösterilir (`rationale`; verilmezse SDK'nın Türkçe/İngilizce
+  varsayılan metni), kullanıcı "Şimdi değil" derse sistem istemi açılmaz. İzin varsa veya verildiyse `true`; reddedildiyse,
+  uygulama izni tanımlamadıysa ya da vazgeçildiyse `false`. `isShared()` native SDK'daki özelliğin asenkron karşılığıdır.
+- `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` koduyla reddedilir.
+- **KVKK:** sunucuya ulaşan ilk konum açık rıza kaydı olarak saklanır. Kullanıcıya konumun neden kullanıldığını
+  açıklayın ve paylaşımı yalnızca onayıyla açın. `setShared(false)` sunucuya `location: null` gönderir; konum ve rıza
+  kaydı silinir, henüz gönderilmemiş konum atılır.
+- **iOS:** `Info.plist` dosyasına `NSLocationWhenInUseUsageDescription` ekleyin (yoksa `requestPermission` `false` döner);
+  `config.xml` içinde `<platform name="ios">` altına
+  `<edit-config file="*-Info.plist" target="NSLocationWhenInUseUsageDescription" mode="merge"><string>…</string></edit-config>`. Yalnızca "Uygulamayı Kullanırken" izni istenir; "Her Zaman" istenmez. Reddedilmiş izin yeniden
+  sorulamaz, kullanıcı Ayarlar'a yönlendirilmelidir.
+- **Android:** eklenti konum iznini manifest'e **otomatik eklemez**; uygulamanın `config.xml` dosyasına kendiniz ekleyin
+  (yaklaşık konum yeterlidir, hassas konum isteğe bağlıdır; `<widget>` öğesinde
+  `xmlns:android="http://schemas.android.com/apk/res/android"` tanımlı olmalıdır):
+
+  ```xml
+  <platform name="android">
+    <config-file target="AndroidManifest.xml" parent="/manifest">
+      <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+      <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    </config-file>
+  </platform>
+  ```
+
+  Yalnızca manifest'te tanımlı izinler istenir; hiçbiri yoksa uyarı loglanır ve `false` döner. Açıklama diyaloğu SDK'nın
+  string kaynaklarını kullanır; sistem izni `cordova.requestPermissions` ile (`HeroSignal.Location.PERMISSION_REQUEST_CODE`)
+  istenir ve sonuç SDK'ya iletilir.
 
 ### Olaylar
 

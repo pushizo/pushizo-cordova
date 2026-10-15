@@ -137,6 +137,35 @@ describe('HeroSignalCore', () => {
     });
   });
 
+  it('Location: paylaşım tercihi, okuma ve izin isteği köprüye iletilir', async () => {
+    const f = fakeBridge({ isLocationShared: { shared: true }, requestLocationPermission: { permission: true } });
+    const hs = new HeroSignalCore(f.bridge);
+    await hs.Location.setShared(true);
+    await hs.Location.setShared(false);
+    expect(await hs.Location.isShared()).toBe(true);
+    expect(await hs.Location.requestPermission('Yakındaki mağazaları göstermek için')).toBe(true);
+    expect(await hs.Location.requestPermission()).toBe(true);
+    // Boş açıklama gönderilmez; native SDK yerelleştirilmiş varsayılan metni kullanır.
+    expect(await hs.Location.requestPermission('   ')).toBe(true);
+    expect(f.calls).toEqual([
+      { method: 'setLocationShared', args: { shared: true } },
+      { method: 'setLocationShared', args: { shared: false } },
+      { method: 'isLocationShared', args: undefined },
+      { method: 'requestLocationPermission', args: { rationale: 'Yakındaki mağazaları göstermek için' } },
+      { method: 'requestLocationPermission', args: {} },
+      { method: 'requestLocationPermission', args: {} },
+    ]);
+  });
+
+  it('Location: eksik yanıt false sayılır; metin olmayan açıklama köprüye gitmeden reddedilir', async () => {
+    const f = fakeBridge({ requestLocationPermission: { permission: false } });
+    const hs = new HeroSignalCore(f.bridge);
+    expect(await hs.Location.isShared()).toBe(false);
+    expect(await hs.Location.requestPermission()).toBe(false);
+    await expect(hs.Location.requestPermission(42 as never)).rejects.toThrow(/rationale metin olmalı/);
+    expect(f.calls.map((c) => c.method)).toEqual(['isLocationShared', 'requestLocationPermission']);
+  });
+
   it('tag/tetik değerleri metne çevrilir, null değerler atlanır, nesne reddedilir', async () => {
     const f = fakeBridge({ getTags: { tags: { plan: 'pro' } }, getTriggers: { triggers: { level: '3' } } });
     const hs = new HeroSignalCore(f.bridge);

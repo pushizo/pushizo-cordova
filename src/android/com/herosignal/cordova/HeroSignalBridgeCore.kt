@@ -1,6 +1,11 @@
 package com.herosignal.cordova
 
+import android.Manifest
+import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import com.herosignal.sdk.HeroSignal
 import com.herosignal.sdk.HsApiException
 import com.herosignal.sdk.HsCallback
@@ -120,9 +125,79 @@ internal class HeroSignalBridgeCore(
 
     fun permissionJson(): JSONObject = JSONObject().put("permission", HeroSignal.Notifications.permission)
 
+    // --- Konum izni (v2 Faz 17b) ---
+
     /**
-     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission` Activity gerektirdiğinden
-     * köprü sınıfında ele alınır.
+     * Konum izni akışı: Android SDK'nın `Location.requestPermission` sonucu geri çağrıyla bildirilmediğinden köprü aynı
+     * adımları kendi izin mekanizmasıyla yürütür. İzin zaten varsa true; uygulama manifest'inde konum izni yoksa veya
+     * Activity yoksa false. Değilse açıklama diyaloğu gösterilir (başlık/düğmeler SDK string kaynakları, mesaj
+     * `rationale` ya da SDK varsayılanı); "Şimdi değil"/iptal false döner, "Devam" ise [requestSystem] ile köprünün izin
+     * API'si üzerinden sistem izni istenir — sonuç geldiğinde köprü [onLocationPermissionResult] yanıtını döndürür.
+     */
+    fun requestLocationPermission(activity: Activity?, args: JSONObject, reply: Reply, requestSystem: (Array<String>) -> Unit) {
+        if (!HeroSignal.isInitialized) {
+            reply.error("NOT_READY", NOT_INITIALIZED)
+            return
+        }
+        if (HeroSignal.Location.permissionGranted) {
+            reply.success(onLocationPermissionResult())
+            return
+        }
+        val permissions = declaredLocationPermissions()
+        if (permissions.isEmpty()) {
+            HsLog.w("konum izni istenemedi: uygulama manifest'inde ACCESS_COARSE_LOCATION/ACCESS_FINE_LOCATION yok")
+            reply.success(locationPermissionJson())
+            return
+        }
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            HsLog.w("konum izni istenemedi: etkin Activity yok")
+            reply.success(locationPermissionJson())
+            return
+        }
+        val rationale = args.optStringOrNull("rationale")?.takeIf { it.isNotBlank() }
+        activity.runOnUiThread {
+            if (activity.isFinishing || activity.isDestroyed) {
+                reply.success(locationPermissionJson())
+                return@runOnUiThread
+            }
+            AlertDialog.Builder(activity)
+                .setTitle(com.herosignal.sdk.R.string.hs_location_rationale_title)
+                .setMessage(rationale ?: activity.getString(com.herosignal.sdk.R.string.hs_location_rationale_message))
+                .setPositiveButton(com.herosignal.sdk.R.string.hs_location_rationale_continue) { _, _ -> requestSystem(permissions) }
+                .setNegativeButton(com.herosignal.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(locationPermissionJson()) }
+                .setOnCancelListener { reply.success(locationPermissionJson()) }
+                .show()
+        }
+    }
+
+    /** Sistem izin sonucu: SDK bilgilendirilir (izin verildiyse ve paylaşım açıksa konum gönderilir), güncel izin döner. */
+    fun onLocationPermissionResult(): JSONObject {
+        HeroSignal.Location.onPermissionResult()
+        return locationPermissionJson()
+    }
+
+    fun locationPermissionJson(): JSONObject = JSONObject().put("permission", HeroSignal.Location.permissionGranted)
+
+    /** Uygulama manifest'inde tanımlı konum izinleri (eklenti izinleri otomatik eklemez; README "Konum"). */
+    private fun declaredLocationPermissions(): Array<String> {
+        val requested = try {
+            val pm = context.packageManager
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            }
+            info.requestedPermissions?.toSet().orEmpty()
+        } catch (e: PackageManager.NameNotFoundException) {
+            emptySet()
+        }
+        return LOCATION_PERMISSIONS.filter { it in requested }.toTypedArray()
+    }
+
+    /**
+     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission` ve `requestLocationPermission` Activity
+     * gerektirdiğinden köprü sınıfında ele alınır.
      */
     fun handle(method: String, args: JSONObject, reply: Reply): Boolean {
         try {
@@ -217,6 +292,14 @@ internal class HeroSignalBridgeCore(
                 "inboxArchive" -> HeroSignal.Inbox.archive(args.requireString("id"), callback(reply) { null })
                 "inboxUnreadCount" -> HeroSignal.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
 
+                // Konum (v2 Faz 17b): izin isteği Activity gerektirdiğinden köprü sınıfında ele alınır.
+                "setLocationShared" -> {
+                    check(HeroSignal.isInitialized) { NOT_INITIALIZED }
+                    HeroSignal.Location.setShared(args.optBoolean("shared", false))
+                    reply.success(null)
+                }
+                "isLocationShared" -> reply.success(JSONObject().put("shared", HeroSignal.Location.isShared))
+
                 // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
                 "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
                 "startDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
@@ -250,6 +333,8 @@ internal class HeroSignalBridgeCore(
 
     companion object {
         private const val MAX_PENDING_FOREGROUND = 32
+        private const val NOT_INITIALIZED = "Önce HeroSignal.initialize çağrılmalı"
+        private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         private const val LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"
         private const val LIVE_ACTIVITY_UNSUPPORTED_MESSAGE = "Live Activities yalnızca iOS'ta desteklenir"
 
