@@ -1,4 +1,4 @@
-import type { ForegroundWillDisplayEvent, HeroSignalNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -9,9 +9,9 @@ export interface Bridge {
 }
 type Listener<T> = (event: T) => void;
 /** Native bildirim nesnesini eksik alanlara karşı normalize eder. */
-export declare function normalizeNotification(raw: Partial<HeroSignalNotification> | undefined): HeroSignalNotification;
-/** Uygulamaların kullandığı HeroSignal cephesi. */
-export declare class HeroSignalCore {
+export declare function normalizeNotification(raw: Partial<PushizoNotification> | undefined): PushizoNotification;
+/** Uygulamaların kullandığı Pushizo cephesi. */
+export declare class PushizoCore {
     private readonly bridge;
     private subscribed;
     private subscribing;
@@ -94,7 +94,7 @@ export declare class HeroSignalCore {
         getPermission: () => Promise<boolean>;
         /** İzin ister; sonuç izin durumudur. */
         requestPermission: () => Promise<boolean>;
-        /** Tepsideki/bildirim merkezindeki tüm HeroSignal bildirimlerini kaldırır ve rozeti sıfırlar. */
+        /** Tepsideki/bildirim merkezindeki tüm Pushizo bildirimlerini kaldırır ve rozeti sıfırlar. */
         clearAll: () => Promise<void>;
         /**
          * Tek bildirimi kaldırır. Android: `notification.androidNotificationId` (tamsayı). iOS: bildirim isteği kimliği
@@ -167,7 +167,7 @@ export declare class HeroSignalCore {
         requestPermission: (rationale?: string) => Promise<boolean>;
     };
     /**
-     * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır;
+     * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `PushizoDefaultLiveActivityAttributes` türünü kullanır;
      * widget extension'da bu türle `ActivityConfiguration` tanımlanmalı ve sunucuda tür adı aynen kaydedilmelidir.
      * Android ve web `PLATFORM_NOT_SUPPORTED` koduyla reddeder.
      */
@@ -179,7 +179,7 @@ export declare class HeroSignalCore {
         setupDefaultLiveActivity: () => Promise<void>;
         /**
          * Genel türle yerel bir etkinlik başlatır (iOS 16.1+); sunucu sonraki `update`/`end` çağrılarını `activityId` ile
-         * yapar. `attributes` içinde `herosignal` anahtarı ayrılmıştır.
+         * yapar. `attributes` içinde `pushizo` anahtarı ayrılmıştır.
          */
         startDefaultLiveActivity: (activityId: string, attributes: Record<string, LiveActivityValue>, contentState: Record<string, LiveActivityValue>) => Promise<void>;
     };

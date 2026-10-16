@@ -1,0 +1,6 @@
+// Pushizo Android SDK deposu: Maven Central yayını öncesinde `sdk/android` içinde
+// `gradle :pushizo:publishToMavenLocal` ile yerel Maven deposuna kurulan artefakt kullanılabilir.
+repositories {
+    mavenCentral()
+    mavenLocal()
+}

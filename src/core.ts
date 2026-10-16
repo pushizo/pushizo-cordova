@@ -1,5 +1,5 @@
 /*
- * HeroSignal köprü cephesi (plan 06 §6.1 ortak yüzey). Taşıma katmanından bağımsızdır:
+ * Pushizo köprü cephesi (plan 06 §6.1 ortak yüzey). Taşıma katmanından bağımsızdır:
  * Capacitor eklentisi ve Cordova `cordova.exec` köprüsü aynı cepheyi kullanır
  * (`sdk/capacitor/src/core.ts` ile aynı içerik; değişiklik iki pakete birlikte yapılır).
  * Native olaylar tek noktadan alınır, JS dinleyicilerine dağıtılır; ön plan gösterim kararı
@@ -7,7 +7,7 @@
  */
 import type {
   ForegroundWillDisplayEvent,
-  HeroSignalNotification,
+  PushizoNotification,
   InAppClickEvent,
   InAppLifecycleEvent,
   InAppLifecycleListener,
@@ -55,26 +55,26 @@ function safeInvoke<T>(listener: Listener<T>, event: T): void {
   try {
     listener(event);
   } catch (err) {
-    console.error('[HeroSignal] dinleyici hatası', err);
+    console.error('[Pushizo] dinleyici hatası', err);
   }
 }
 
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`HeroSignal: ${name} boş olmayan bir metin olmalı.`);
+    throw new TypeError(`Pushizo: ${name} boş olmayan bir metin olmalı.`);
   }
   return value;
 }
 
 function stringRecord(input: Record<string, unknown>, name: string): Record<string, string> {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
-    throw new TypeError(`HeroSignal: ${name} bir nesne olmalı.`);
+    throw new TypeError(`Pushizo: ${name} bir nesne olmalı.`);
   }
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value === null || value === undefined) continue;
     if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
-      throw new TypeError(`HeroSignal: ${name}.${key} metin, sayı veya boolean olmalı.`);
+      throw new TypeError(`Pushizo: ${name}.${key} metin, sayı veya boolean olmalı.`);
     }
     out[key] = String(value);
   }
@@ -85,11 +85,11 @@ function stringRecord(input: Record<string, unknown>, name: string): Record<stri
 const LIVE_ACTIVITY_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
 const MAX_LIVE_ACTIVITY_KEY_LENGTH = 64;
 /** Sunucunun uzaktan başlatmada `attributes` içine eklediği ayrılmış anahtar. */
-const RESERVED_LIVE_ACTIVITY_KEY = 'herosignal';
+const RESERVED_LIVE_ACTIVITY_KEY = 'pushizo';
 
 function liveActivityId(value: unknown): string {
   if (typeof value !== 'string' || !LIVE_ACTIVITY_ID.test(value)) {
-    throw new TypeError('HeroSignal: activityId 1-100 karakter olmalı (harf, rakam ve _ . : -).');
+    throw new TypeError('Pushizo: activityId 1-100 karakter olmalı (harf, rakam ve _ . : -).');
   }
   return value;
 }
@@ -98,16 +98,16 @@ function liveActivityId(value: unknown): string {
 function liveActivityValues(input: unknown, name: string, reservedKey?: string): Record<string, LiveActivityValue> {
   const proto: unknown = input !== null && typeof input === 'object' ? Object.getPrototypeOf(input) : undefined;
   if (Array.isArray(input) || (proto !== Object.prototype && proto !== null)) {
-    throw new TypeError(`HeroSignal: ${name} düz bir nesne olmalı.`);
+    throw new TypeError(`Pushizo: ${name} düz bir nesne olmalı.`);
   }
   const out: Record<string, LiveActivityValue> = {};
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
     if (key.length < 1 || key.length > MAX_LIVE_ACTIVITY_KEY_LENGTH) {
-      throw new TypeError(`HeroSignal: ${name} anahtarları 1-${MAX_LIVE_ACTIVITY_KEY_LENGTH} karakter olmalı.`);
+      throw new TypeError(`Pushizo: ${name} anahtarları 1-${MAX_LIVE_ACTIVITY_KEY_LENGTH} karakter olmalı.`);
     }
-    if (key === reservedKey) throw new TypeError(`HeroSignal: ${name} içinde '${reservedKey}' anahtarı ayrılmıştır.`);
+    if (key === reservedKey) throw new TypeError(`Pushizo: ${name} içinde '${reservedKey}' anahtarı ayrılmıştır.`);
     if (typeof value !== 'string' && typeof value !== 'boolean' && !(typeof value === 'number' && Number.isFinite(value))) {
-      throw new TypeError(`HeroSignal: ${name}.${key} metin, sonlu sayı veya boolean olmalı.`);
+      throw new TypeError(`Pushizo: ${name}.${key} metin, sonlu sayı veya boolean olmalı.`);
     }
     out[key] = value;
   }
@@ -129,17 +129,17 @@ interface PreferenceArg {
 /** `setPreferences` girdisini yerel SDK kurallarıyla doğrular: 1-100 kayıt, kategori 1-64 karakter, bilinen kanal. */
 function preferenceArgs(input: PreferenceInput[]): PreferenceArg[] {
   if (!Array.isArray(input) || input.length === 0 || input.length > 100) {
-    throw new RangeError('HeroSignal: preferences 1-100 kayıt olmalı.');
+    throw new RangeError('Pushizo: preferences 1-100 kayıt olmalı.');
   }
   return input.map((p, i) => {
-    if (p === null || typeof p !== 'object') throw new TypeError(`HeroSignal: preferences[${i}] bir nesne olmalı.`);
+    if (p === null || typeof p !== 'object') throw new TypeError(`Pushizo: preferences[${i}] bir nesne olmalı.`);
     const category = requireString(p.category, `preferences[${i}].category`).trim();
-    if (category.length > 64) throw new RangeError(`HeroSignal: preferences[${i}].category en fazla 64 karakter olmalı.`);
+    if (category.length > 64) throw new RangeError(`Pushizo: preferences[${i}].category en fazla 64 karakter olmalı.`);
     const channel = p.channel ?? null;
     if (channel !== null && !PREFERENCE_CHANNELS.includes(channel)) {
-      throw new TypeError(`HeroSignal: preferences[${i}].channel ${PREFERENCE_CHANNELS.join('|')} veya null olmalı.`);
+      throw new TypeError(`Pushizo: preferences[${i}].channel ${PREFERENCE_CHANNELS.join('|')} veya null olmalı.`);
     }
-    if (typeof p.optedIn !== 'boolean') throw new TypeError(`HeroSignal: preferences[${i}].optedIn boolean olmalı.`);
+    if (typeof p.optedIn !== 'boolean') throw new TypeError(`Pushizo: preferences[${i}].optedIn boolean olmalı.`);
     return { category, channel, optedIn: p.optedIn };
   });
 }
@@ -182,7 +182,7 @@ function normalizePreferences(raw: RawPreferences): UserPreferences {
 }
 
 /** Native bildirim nesnesini eksik alanlara karşı normalize eder. */
-export function normalizeNotification(raw: Partial<HeroSignalNotification> | undefined): HeroSignalNotification {
+export function normalizeNotification(raw: Partial<PushizoNotification> | undefined): PushizoNotification {
   const n = raw ?? {};
   return {
     title: n.title ?? null,
@@ -196,8 +196,8 @@ export function normalizeNotification(raw: Partial<HeroSignalNotification> | und
   };
 }
 
-/** Uygulamaların kullandığı HeroSignal cephesi. */
-export class HeroSignalCore {
+/** Uygulamaların kullandığı Pushizo cephesi. */
+export class PushizoCore {
   private subscribed = false;
   private subscribing: Promise<void> | null = null;
   private readonly clickListeners = new Set<Listener<NotificationClickEvent>>();
@@ -312,7 +312,7 @@ export class HeroSignalCore {
     };
     this.foregroundListeners.forEach((l) => safeInvoke(l, event));
     if (raw.pending && !prevented) {
-      event.display().catch((err) => console.error('[HeroSignal] bildirim gösterilemedi', err));
+      event.display().catch((err) => console.error('[Pushizo] bildirim gösterilemedi', err));
     }
   }
 
@@ -322,15 +322,15 @@ export class HeroSignalCore {
     this.foregroundFlag = enabled;
     this.bridge
       .call('setForegroundHandlerEnabled', { enabled })
-      .catch((err) => console.error('[HeroSignal] ön plan işleyicisi ayarlanamadı', err));
+      .catch((err) => console.error('[Pushizo] ön plan işleyicisi ayarlanamadı', err));
   }
 
   private listen<T>(set: Set<T>, listener: T): () => void {
     if (typeof listener !== 'function' && (typeof listener !== 'object' || listener === null)) {
-      throw new TypeError('HeroSignal: dinleyici bir fonksiyon olmalı.');
+      throw new TypeError('Pushizo: dinleyici bir fonksiyon olmalı.');
     }
     set.add(listener);
-    this.ensureSubscribed().catch((err) => console.error('[HeroSignal] olaylara abone olunamadı', err));
+    this.ensureSubscribed().catch((err) => console.error('[Pushizo] olaylara abone olunamadı', err));
     return () => {
       set.delete(listener);
     };
@@ -344,7 +344,7 @@ export class HeroSignalCore {
       typeof appIdOrOptions === 'string' ? { ...options, appId: appIdOrOptions } : { ...appIdOrOptions };
     requireString(opts.appId, 'appId');
     if (opts.logLevel !== undefined && !LOG_LEVELS.includes(opts.logLevel)) {
-      throw new TypeError(`HeroSignal: logLevel ${LOG_LEVELS.join('|')} olmalı.`);
+      throw new TypeError(`Pushizo: logLevel ${LOG_LEVELS.join('|')} olmalı.`);
     }
     await this.ensureSubscribed();
     await this.bridge.call('initialize', opts as unknown as Record<string, unknown>);
@@ -450,7 +450,7 @@ export class HeroSignalCore {
     /** İzin ister; sonuç izin durumudur. */
     requestPermission: async (): Promise<boolean> =>
       Boolean((await this.bridge.call<{ permission: boolean }>('requestPermission')).permission),
-    /** Tepsideki/bildirim merkezindeki tüm HeroSignal bildirimlerini kaldırır ve rozeti sıfırlar. */
+    /** Tepsideki/bildirim merkezindeki tüm Pushizo bildirimlerini kaldırır ve rozeti sıfırlar. */
     clearAll: (): Promise<void> => this.bridge.call('clearAll'),
     /**
      * Tek bildirimi kaldırır. Android: `notification.androidNotificationId` (tamsayı). iOS: bildirim isteği kimliği
@@ -458,7 +458,7 @@ export class HeroSignalCore {
      */
     removeNotification: (id: number | string): Promise<void> => {
       if (typeof id === 'string') return this.bridge.call('removeNotification', { identifier: requireString(id, 'identifier') });
-      if (!Number.isInteger(id)) throw new TypeError('HeroSignal: androidNotificationId tamsayı olmalı.');
+      if (!Number.isInteger(id)) throw new TypeError('Pushizo: androidNotificationId tamsayı olmalı.');
       return this.bridge.call('removeNotification', { id });
     },
     /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
@@ -502,7 +502,7 @@ export class HeroSignalCore {
     sendEvent: (name: string, properties?: Record<string, unknown>, value?: number): Promise<void> => {
       const args: Record<string, unknown> = { name: requireString(name, 'name'), properties: properties ?? {} };
       if (value !== undefined && value !== null) {
-        if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('HeroSignal: value sayı olmalı.');
+        if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('Pushizo: value sayı olmalı.');
         args.value = value;
       }
       return this.bridge.call('sendEvent', args);
@@ -546,7 +546,7 @@ export class HeroSignalCore {
     list: (options: InboxListOptions = {}): Promise<InboxPage> => {
       const limit = options.limit ?? 50;
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-        return Promise.reject(new RangeError('HeroSignal: limit 1-200 olmalı.'));
+        return Promise.reject(new RangeError('Pushizo: limit 1-200 olmalı.'));
       }
       const args: Record<string, unknown> = { limit };
       if (options.cursor) args.cursor = options.cursor;
@@ -587,7 +587,7 @@ export class HeroSignalCore {
      */
     requestPermission: async (rationale?: string): Promise<boolean> => {
       if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
-        throw new TypeError('HeroSignal: rationale metin olmalı.');
+        throw new TypeError('Pushizo: rationale metin olmalı.');
       }
       const args: Record<string, unknown> = {};
       if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
@@ -598,7 +598,7 @@ export class HeroSignalCore {
   // --- Live Activities (iOS) ---
 
   /**
-   * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `HeroSignalDefaultLiveActivityAttributes` türünü kullanır;
+   * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `PushizoDefaultLiveActivityAttributes` türünü kullanır;
    * widget extension'da bu türle `ActivityConfiguration` tanımlanmalı ve sunucuda tür adı aynen kaydedilmelidir.
    * Android ve web `PLATFORM_NOT_SUPPORTED` koduyla reddeder.
    */
@@ -610,7 +610,7 @@ export class HeroSignalCore {
     setupDefaultLiveActivity: (): Promise<void> => this.bridge.call('setupDefaultLiveActivity'),
     /**
      * Genel türle yerel bir etkinlik başlatır (iOS 16.1+); sunucu sonraki `update`/`end` çağrılarını `activityId` ile
-     * yapar. `attributes` içinde `herosignal` anahtarı ayrılmıştır.
+     * yapar. `attributes` içinde `pushizo` anahtarı ayrılmıştır.
      */
     startDefaultLiveActivity: (
       activityId: string,
@@ -628,7 +628,7 @@ export class HeroSignalCore {
 
   readonly Debug = {
     setLogLevel: (level: LogLevel): Promise<void> => {
-      if (!LOG_LEVELS.includes(level)) throw new TypeError(`HeroSignal: level ${LOG_LEVELS.join('|')} olmalı.`);
+      if (!LOG_LEVELS.includes(level)) throw new TypeError(`Pushizo: level ${LOG_LEVELS.join('|')} olmalı.`);
       return this.bridge.call('setLogLevel', { level });
     },
   };

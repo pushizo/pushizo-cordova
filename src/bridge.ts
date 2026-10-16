@@ -1,11 +1,11 @@
 /*
- * `cordova.exec` taşıma katmanı: cephe metot çağrılarını native `HeroSignal` servisine iletir,
+ * `cordova.exec` taşıma katmanı: cephe metot çağrılarını native `Pushizo` servisine iletir,
  * native olaylarını tek bir `keepCallback` kanalından alır.
  */
 import type { Bridge, BridgeEventType } from './core';
 
-/** Native servis adı (`plugin.xml` <feature name="HeroSignal">). */
-const SERVICE = 'HeroSignal';
+/** Native servis adı (`plugin.xml` <feature name="Pushizo">). */
+const SERVICE = 'Pushizo';
 
 type Exec = (
   success: (result?: unknown) => void,
@@ -16,30 +16,30 @@ type Exec = (
 ) => void;
 
 /** Native hatası; `code` sunucu/SDK hata kodudur (INVALID_ARGUMENT, NOT_READY, NOT_FOUND, …). */
-export class HeroSignalError extends Error {
+export class PushizoError extends Error {
   constructor(
     message: string,
     readonly code: string,
   ) {
     super(message);
-    this.name = 'HeroSignalError';
+    this.name = 'PushizoError';
   }
 }
 
-function toError(raw: unknown): HeroSignalError {
+function toError(raw: unknown): PushizoError {
   if (raw && typeof raw === 'object') {
     const r = raw as { code?: unknown; message?: unknown };
     const code = typeof r.code === 'string' ? r.code : 'HS_ERROR';
-    return new HeroSignalError(typeof r.message === 'string' ? r.message : code, code);
+    return new PushizoError(typeof r.message === 'string' ? r.message : code, code);
   }
-  return new HeroSignalError(typeof raw === 'string' ? raw : 'HeroSignal hatası', 'HS_ERROR');
+  return new PushizoError(typeof raw === 'string' ? raw : 'Pushizo hatası', 'HS_ERROR');
 }
 
 function resolveExec(): Exec {
   const g = globalThis as { cordova?: { exec?: Exec } };
   const exec = g.cordova?.exec;
   if (typeof exec !== 'function') {
-    throw new HeroSignalError('cordova.exec bulunamadı; `deviceready` olayından sonra çağırın.', 'NOT_READY');
+    throw new PushizoError('cordova.exec bulunamadı; `deviceready` olayından sonra çağırın.', 'NOT_READY');
   }
   return exec;
 }
@@ -73,7 +73,7 @@ export function cordovaBridge(): Bridge {
           const m = message as { type?: BridgeEventType; payload?: unknown };
           if (m.type) handler(m.type, m.payload ?? {});
         },
-        (error) => console.error('[HeroSignal] olay kanalı hatası', error),
+        (error) => console.error('[Pushizo] olay kanalı hatası', error),
         SERVICE,
         'setEventCallback',
         [],

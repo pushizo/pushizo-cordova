@@ -1,11 +1,11 @@
 /** SDK günlük seviyesi (native `HsLog.Level` / `HSLog.Level`). */
 export type LogLevel = 'none' | 'error' | 'warn' | 'info' | 'debug';
 
-/** `HeroSignal.initialize` seçenekleri. */
+/** `Pushizo.initialize` seçenekleri. */
 export interface InitializeOptions {
   /** Dashboard'daki uygulama kimliği (`app_…`). */
   appId: string;
-  /** API kökü; varsayılan `https://api.herosignal.dev`. */
+  /** API kökü; varsayılan `https://api.pushizo.com`. */
   apiUrl?: string;
   /** KVKK/GDPR: `setConsentGiven(true)` çağrılana kadar hiçbir ağ çağrısı yapılmaz. */
   requiresPrivacyConsent?: boolean;
@@ -14,7 +14,7 @@ export interface InitializeOptions {
 }
 
 /**
- * `HeroSignal.login` kimlik kanıtı (ADR-0023 §9). App'in `identity_verification_mode` ayarına göre HMAC
+ * `Pushizo.login` kimlik kanıtı (ADR-0023 §9). App'in `identity_verification_mode` ayarına göre HMAC
  * `identityHash` ve/veya sunucunuzda imzalanmış ES256 `jwt` (`sub` = externalId, `aud` = appId) verilir.
  */
 export interface LoginOptions {
@@ -24,7 +24,7 @@ export interface LoginOptions {
 }
 
 /** Bildirim içeriği (native `HsNotification` / `HSNotification`). */
-export interface HeroSignalNotification {
+export interface PushizoNotification {
   title: string | null;
   body: string | null;
   url: string | null;
@@ -38,13 +38,13 @@ export interface HeroSignalNotification {
 
 /** Bildirim tıklaması: `result.actionId` düğme kimliği (gövde tıklamasında null). */
 export interface NotificationClickEvent {
-  notification: HeroSignalNotification;
+  notification: PushizoNotification;
   result: { actionId: string | null; url: string | null };
 }
 
 /** Uygulama ön plandayken gelen bildirim; dinleyici gösterimi engelleyebilir veya erteleyebilir. */
 export interface ForegroundWillDisplayEvent {
-  notification: HeroSignalNotification;
+  notification: PushizoNotification;
   /** Bildirimin şimdi gösterilmesini engeller; daha sonra `display()` ile gösterilebilir. */
   preventDefault(): void;
   /** Engellenmiş bildirimi gösterir (iOS'ta olaydan sonra en fazla 25 sn içinde). */
@@ -156,7 +156,7 @@ export interface PreferenceInput {
 export type InAppTriggerValue = string | number | boolean;
 
 /**
- * iOS Live Activity alan değeri (`HeroSignalDefaultLiveActivityAttributes.data` / `ContentState.data`): metin, sonlu
+ * iOS Live Activity alan değeri (`PushizoDefaultLiveActivityAttributes.data` / `ContentState.data`): metin, sonlu
  * sayı veya mantıksal değer.
  */
 export type LiveActivityValue = string | number | boolean;
@@ -167,7 +167,7 @@ export interface RawForegroundEvent {
   notificationId: string;
   /** true ise native gösterimi bekletiyor; JS karar vermeli (göster/engelle). */
   pending: boolean;
-  notification: HeroSignalNotification;
+  notification: PushizoNotification;
 }
 
 export interface RawInAppLifecycleEvent {

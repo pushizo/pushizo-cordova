@@ -1,7 +1,7 @@
 import Foundation
-import HeroSignal
-#if canImport(HeroSignalCore)
-import HeroSignalCore
+import Pushizo
+#if canImport(PushizoCore)
+import PushizoCore
 #endif
 import ObjectiveC
 import UIKit
@@ -11,7 +11,7 @@ import UIKit
  zamanında AppDelegate sınıfına eklenir. Uygulama bu metotları zaten uyguluyorsa önce SDK'ya iletilir, ardından
  özgün uygulama çağrılır; uygulamıyorsa yalnızca SDK'ya iletilir. Bir kez kurulur.
  */
-enum HeroSignalAppDelegateHook {
+enum PushizoAppDelegateHook {
     private static var installed = false
 
     private typealias TokenImp = @convention(c) (AnyObject, Selector, UIApplication, NSData) -> Void
@@ -25,7 +25,7 @@ enum HeroSignalAppDelegateHook {
         let tokenSelector = #selector(UIApplicationDelegate.application(_:didRegisterForRemoteNotificationsWithDeviceToken:))
         let originalToken = class_getInstanceMethod(cls, tokenSelector).map { unsafeBitCast(method_getImplementation($0), to: TokenImp.self) }
         let tokenBlock: @convention(block) (AnyObject, UIApplication, NSData) -> Void = { receiver, application, token in
-            HeroSignal.setDeviceToken(token as Data)
+            Pushizo.setDeviceToken(token as Data)
             originalToken?(receiver, tokenSelector, application, token)
         }
         replace(cls, tokenSelector, imp_implementationWithBlock(tokenBlock))
@@ -33,7 +33,7 @@ enum HeroSignalAppDelegateHook {
         let errorSelector = #selector(UIApplicationDelegate.application(_:didFailToRegisterForRemoteNotificationsWithError:))
         let originalError = class_getInstanceMethod(cls, errorSelector).map { unsafeBitCast(method_getImplementation($0), to: ErrorImp.self) }
         let errorBlock: @convention(block) (AnyObject, UIApplication, NSError) -> Void = { receiver, application, error in
-            HeroSignal.setDeviceTokenError(error)
+            Pushizo.setDeviceTokenError(error)
             originalError?(receiver, errorSelector, application, error)
         }
         replace(cls, errorSelector, imp_implementationWithBlock(errorBlock))

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HeroSignalCore } from '../src/core';
+import { PushizoCore } from '../src/core';
 import type { Bridge, BridgeEventType } from '../src/core';
 import type { ForegroundWillDisplayEvent, NotificationClickEvent } from '../src/definitions';
 
@@ -40,10 +40,10 @@ const notification = {
   androidNotificationId: 42,
 };
 
-describe('HeroSignalCore', () => {
+describe('PushizoCore', () => {
   it('initialize: appId ve seçenekleri iletir, olaylara bir kez abone olur', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.initialize('app_1', { apiUrl: 'https://api.test', logLevel: 'debug' });
     await hs.initialize({ appId: 'app_1' });
     expect(f.subscribe).toHaveBeenCalledTimes(1);
@@ -51,14 +51,14 @@ describe('HeroSignalCore', () => {
   });
 
   it('initialize: geçersiz appId ve logLevel reddedilir', async () => {
-    const hs = new HeroSignalCore(fakeBridge().bridge);
+    const hs = new PushizoCore(fakeBridge().bridge);
     await expect(hs.initialize('')).rejects.toThrow(TypeError);
     await expect(hs.initialize('app_1', { logLevel: 'verbose' as never })).rejects.toThrow(/logLevel/);
   });
 
   it('login identityHash yalnızca verildiğinde gönderilir', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.login('user_1');
     await hs.login('user_2', 'hash');
     await hs.logout();
@@ -71,7 +71,7 @@ describe('HeroSignalCore', () => {
 
   it('JWT identity verification: login seçenekleri ve updateUserJwt köprüye iletilir', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.login('user_1', { jwt: 'a.b.c' });
     await hs.login('user_2', { identityHash: 'hash', jwt: 'a.b.c' });
     await hs.updateUserJwt('d.e.f');
@@ -86,7 +86,7 @@ describe('HeroSignalCore', () => {
 
   it('Live Activities: argümanlar köprüye iletilir', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.LiveActivities.setupDefaultLiveActivity();
     await hs.LiveActivities.startDefaultLiveActivity(
       'order_42:a-b.c',
@@ -108,12 +108,12 @@ describe('HeroSignalCore', () => {
 
   it('Live Activities: geçersiz kimlik, anahtar ve değerler köprüye gitmeden reddedilir', () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     const start = hs.LiveActivities.startDefaultLiveActivity;
     expect(() => start('', {}, {})).toThrow(/activityId/);
     expect(() => start('a'.repeat(101), {}, {})).toThrow(/activityId/);
     expect(() => start('order 42', {}, {})).toThrow(/activityId/);
-    expect(() => start('order_42', { herosignal: 'x' }, {})).toThrow(/herosignal/);
+    expect(() => start('order_42', { pushizo: 'x' }, {})).toThrow(/pushizo/);
     expect(() => start('order_42', { ['k'.repeat(65)]: 'x' }, {})).toThrow(TypeError);
     expect(() => start('order_42', { '': 'x' }, {})).toThrow(TypeError);
     expect(() => start('order_42', {}, { eta: Number.NaN })).toThrow(/contentState\.eta/);
@@ -122,15 +122,15 @@ describe('HeroSignalCore', () => {
     expect(() => start('order_42', { x: null as never }, {})).toThrow(TypeError);
     expect(() => start('order_42', [] as never, {})).toThrow(/attributes/);
     expect(() => start('order_42', {}, null as never)).toThrow(/contentState/);
-    // `herosignal` yalnızca attributes içinde ayrılmıştır.
-    expect(() => start('order_42', {}, { herosignal: 'x' })).not.toThrow();
+    // `pushizo` yalnızca attributes içinde ayrılmıştır.
+    expect(() => start('order_42', {}, { pushizo: 'x' })).not.toThrow();
     expect(f.calls.map((c) => c.method)).toEqual(['startDefaultLiveActivity']);
   });
 
   it('Live Activities: native hata kodu (ör. Android PLATFORM_NOT_SUPPORTED) Promise reddiyle yüzeye çıkar', async () => {
     const error = Object.assign(new Error('Live Activities yalnızca iOS\'ta desteklenir'), { code: 'PLATFORM_NOT_SUPPORTED' });
     const bridge: Bridge = { call: vi.fn(async () => Promise.reject(error)), subscribe: vi.fn() };
-    const hs = new HeroSignalCore(bridge);
+    const hs = new PushizoCore(bridge);
     await expect(hs.LiveActivities.setupDefaultLiveActivity()).rejects.toMatchObject({ code: 'PLATFORM_NOT_SUPPORTED' });
     await expect(hs.LiveActivities.startDefaultLiveActivity('order_42', {}, {})).rejects.toMatchObject({
       code: 'PLATFORM_NOT_SUPPORTED',
@@ -139,7 +139,7 @@ describe('HeroSignalCore', () => {
 
   it('Location: paylaşım tercihi, okuma ve izin isteği köprüye iletilir', async () => {
     const f = fakeBridge({ isLocationShared: { shared: true }, requestLocationPermission: { permission: true } });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.Location.setShared(true);
     await hs.Location.setShared(false);
     expect(await hs.Location.isShared()).toBe(true);
@@ -159,7 +159,7 @@ describe('HeroSignalCore', () => {
 
   it('Location: eksik yanıt false sayılır; metin olmayan açıklama köprüye gitmeden reddedilir', async () => {
     const f = fakeBridge({ requestLocationPermission: { permission: false } });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     expect(await hs.Location.isShared()).toBe(false);
     expect(await hs.Location.requestPermission()).toBe(false);
     await expect(hs.Location.requestPermission(42 as never)).rejects.toThrow(/rationale metin olmalı/);
@@ -168,7 +168,7 @@ describe('HeroSignalCore', () => {
 
   it('tag/tetik değerleri metne çevrilir, null değerler atlanır, nesne reddedilir', async () => {
     const f = fakeBridge({ getTags: { tags: { plan: 'pro' } }, getTriggers: { triggers: { level: '3' } } });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.User.addTags({ plan: 'pro', level: 3, vip: true, skip: null as never });
     await hs.InAppMessages.addTrigger('level', 3);
     expect(f.calls[0].args).toEqual({ tags: { plan: 'pro', level: '3', vip: 'true' } });
@@ -185,7 +185,7 @@ describe('HeroSignalCore', () => {
       getPermission: { permission: false },
       requestPermission: { permission: true },
     });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     expect(await hs.User.getId()).toBe('usr_1');
     expect(await hs.User.getExternalId()).toBe('ext_1');
     expect(await hs.User.pushSubscription.getId()).toBe('sub_1');
@@ -197,19 +197,19 @@ describe('HeroSignalCore', () => {
 
   it('e-posta ve SMS listeleri getContacts yanıtından okunur', async () => {
     const f = fakeBridge({ getContacts: { emails: ['a@example.com', 7], smsNumbers: ['+905321234567'] } });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     expect(await hs.User.getEmails()).toEqual(['a@example.com']);
     expect(await hs.User.getSmsNumbers()).toEqual(['+905321234567']);
     expect(f.calls.map((c) => c.method)).toEqual(['getContacts', 'getContacts']);
 
-    const empty = new HeroSignalCore(fakeBridge({ getContacts: null }).bridge);
+    const empty = new PushizoCore(fakeBridge({ getContacts: null }).bridge);
     expect(await empty.User.getEmails()).toEqual([]);
     expect(await empty.User.getSmsNumbers()).toEqual([]);
   });
 
   it('e-posta, SMS, alias, dil ve olay çağrıları doğru argümanlarla gider', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.User.addEmail('ali@example.com');
     await hs.User.addSms('+905551112233');
     await hs.User.addAlias('crm_id', '99');
@@ -231,7 +231,7 @@ describe('HeroSignalCore', () => {
 
   it('soğuk başlatma tıklaması ilk dinleyiciye teslim edilir', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.initialize('app_1');
     f.emit('click', { notification, result: { actionId: 'btn_1', url: 'https://x' } });
     const seen: NotificationClickEvent[] = [];
@@ -248,7 +248,7 @@ describe('HeroSignalCore', () => {
 
   it('dinleyici hatası diğer dinleyicileri durdurmaz', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const second = vi.fn();
     hs.Notifications.addClickListener(() => {
@@ -265,7 +265,7 @@ describe('HeroSignalCore', () => {
   describe('ön plan gösterimi', () => {
     it('dinleyici eklenince native bekletme bayrağı açılır, kaldırılınca kapanır', async () => {
       const f = fakeBridge();
-      const hs = new HeroSignalCore(f.bridge);
+      const hs = new PushizoCore(f.bridge);
       const remove = hs.Notifications.addForegroundLifecycleListener(() => undefined);
       remove();
       await Promise.resolve();
@@ -277,7 +277,7 @@ describe('HeroSignalCore', () => {
 
     it('initialize öncesi eklenen dinleyici için bayrak initialize sonrası gönderilir', async () => {
       const f = fakeBridge();
-      const hs = new HeroSignalCore(f.bridge);
+      const hs = new PushizoCore(f.bridge);
       hs.Notifications.addForegroundLifecycleListener(() => undefined);
       await hs.initialize('app_1');
       const methods = f.calls.map((c) => c.method);
@@ -286,7 +286,7 @@ describe('HeroSignalCore', () => {
 
     it('engellenmeyen bekleyen bildirim gösterilir', async () => {
       const f = fakeBridge();
-      const hs = new HeroSignalCore(f.bridge);
+      const hs = new PushizoCore(f.bridge);
       const seen: ForegroundWillDisplayEvent[] = [];
       hs.Notifications.addForegroundLifecycleListener((e) => seen.push(e));
       await Promise.resolve();
@@ -297,7 +297,7 @@ describe('HeroSignalCore', () => {
 
     it('preventDefault gösterimi engeller; sonradan display() bir kez gösterir', async () => {
       const f = fakeBridge();
-      const hs = new HeroSignalCore(f.bridge);
+      const hs = new PushizoCore(f.bridge);
       let captured: ForegroundWillDisplayEvent | undefined;
       hs.Notifications.addForegroundLifecycleListener((e) => {
         e.preventDefault();
@@ -314,7 +314,7 @@ describe('HeroSignalCore', () => {
 
     it('bekletilmeyen (pending=false) olayda display çağrılmaz; web preventDefault iletilir', async () => {
       const f = fakeBridge();
-      const hs = new HeroSignalCore(f.bridge);
+      const hs = new PushizoCore(f.bridge);
       const webPrevent = vi.fn();
       hs.Notifications.addForegroundLifecycleListener((e) => e.preventDefault());
       await Promise.resolve();
@@ -328,7 +328,7 @@ describe('HeroSignalCore', () => {
 
   it('abonelik, izin ve in-app olayları ilgili dinleyicilere gider', async () => {
     const f = fakeBridge();
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     const sub = vi.fn();
     const perm = vi.fn();
     const inAppClick = vi.fn();
@@ -363,7 +363,7 @@ describe('HeroSignalCore', () => {
       inboxMarkAllRead: { unreadCount: 0 },
       inboxUnreadCount: { unreadCount: 5 },
     });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     expect(await hs.Inbox.list({ limit: 20, cursor: 'c1' })).toEqual(page);
     expect(f.calls[0]).toEqual({ method: 'inboxList', args: { limit: 20, cursor: 'c1' } });
     await expect(hs.Inbox.list({ limit: 0 })).rejects.toThrow(RangeError);
@@ -388,7 +388,7 @@ describe('HeroSignalCore', () => {
       ],
     };
     const f = fakeBridge({ getPreferences: raw, setPreferences: raw });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
 
     const prefs = await hs.User.getPreferences();
     expect(f.calls[0]).toEqual({ method: 'getPreferences', args: undefined });
@@ -417,13 +417,13 @@ describe('HeroSignalCore', () => {
     await expect(hs.User.setPreferences([{ category: 'a', optedIn: 'yes' as never }])).rejects.toThrow(/optedIn/);
     expect(f.calls.length).toBe(calls);
 
-    const empty = new HeroSignalCore(fakeBridge({ getPreferences: null }).bridge);
+    const empty = new PushizoCore(fakeBridge({ getPreferences: null }).bridge);
     expect(await empty.User.getPreferences()).toEqual({ preferences: [], categories: [] });
   });
 
   it('bildirim tepsisi ve in-app yardımcıları', async () => {
     const f = fakeBridge({ getInAppPaused: { paused: true } });
-    const hs = new HeroSignalCore(f.bridge);
+    const hs = new PushizoCore(f.bridge);
     await hs.Notifications.clearAll();
     await hs.Notifications.removeNotification(7);
     await hs.Notifications.removeNotification('ios-req-1');

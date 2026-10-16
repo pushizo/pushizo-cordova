@@ -1,21 +1,21 @@
-package com.herosignal.cordova
+package com.pushizo.cordova
 
 import android.content.Context
-import com.herosignal.sdk.HeroSignal
+import com.pushizo.sdk.Pushizo
 
 /**
  * JS `initialize` ayarlarını saklar. Süreç bildirim tıklaması veya FCM servisi ile yeniden başladığında
  * SDK, WebView yüklenmeden önce bu ayarlarla başlatılır (soğuk başlatma tıklaması ve `received` kaybolmaz).
  * Yalnızca uygulama kimliği ve herkese açık ayarlar tutulur; gizli bilgi yoktur.
  */
-internal object HeroSignalConfigStore {
-    private const val PREFS = "herosignal_cordova"
+internal object PushizoConfigStore {
+    private const val PREFS = "pushizo_cordova"
 
     data class Config(val appId: String, val apiUrl: String, val requiresPrivacyConsent: Boolean, val logLevel: String) {
-        fun toOptions() = HeroSignal.Options(
+        fun toOptions() = Pushizo.Options(
             apiUrl = apiUrl,
             requiresPrivacyConsent = requiresPrivacyConsent,
-            logLevel = HeroSignalBridgeCore.logLevel(logLevel),
+            logLevel = PushizoBridgeCore.logLevel(logLevel),
         )
     }
 
@@ -33,7 +33,7 @@ internal object HeroSignalConfigStore {
         val appId = prefs.getString("app_id", null)?.takeIf { it.isNotBlank() } ?: return null
         return Config(
             appId = appId,
-            apiUrl = prefs.getString("api_url", null) ?: HeroSignal.Options().apiUrl,
+            apiUrl = prefs.getString("api_url", null) ?: Pushizo.Options().apiUrl,
             requiresPrivacyConsent = prefs.getBoolean("requires_privacy_consent", false),
             logLevel = prefs.getString("log_level", null) ?: "warn",
         )

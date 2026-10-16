@@ -1,18 +1,18 @@
 /*
- * cordova-plugin-herosignal tip tanımları. Eklenti `window.HeroSignal` ve `window.plugins.HeroSignal`
- * olarak yüklenir; TypeScript projelerinde `import HeroSignal = require('cordova-plugin-herosignal')`
- * yerine çoğunlukla genel `HeroSignal` değişkeni kullanılır.
+ * cordova-plugin-pushizo tip tanımları. Eklenti `window.Pushizo` ve `window.plugins.Pushizo`
+ * olarak yüklenir; TypeScript projelerinde `import Pushizo = require('cordova-plugin-pushizo')`
+ * yerine çoğunlukla genel `Pushizo` değişkeni kullanılır.
  */
-import type { HeroSignalCore } from '../www/core';
+import type { PushizoCore } from '../www/core';
 import type * as Definitions from '../www/definitions';
 
-declare const HeroSignal: HeroSignalCore;
+declare const Pushizo: PushizoCore;
 
-declare namespace HeroSignal {
+declare namespace Pushizo {
   type LogLevel = Definitions.LogLevel;
   type InitializeOptions = Definitions.InitializeOptions;
   type LoginOptions = Definitions.LoginOptions;
-  type HeroSignalNotification = Definitions.HeroSignalNotification;
+  type PushizoNotification = Definitions.PushizoNotification;
   type NotificationClickEvent = Definitions.NotificationClickEvent;
   type ForegroundWillDisplayEvent = Definitions.ForegroundWillDisplayEvent;
   type PushSubscriptionState = Definitions.PushSubscriptionState;
@@ -32,10 +32,10 @@ declare namespace HeroSignal {
   type PreferenceInput = Definitions.PreferenceInput;
 }
 
-export = HeroSignal;
+export = Pushizo;
 
 declare global {
   interface Window {
-    HeroSignal: HeroSignalCore;
+    Pushizo: PushizoCore;
   }
 }

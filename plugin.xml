@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- HeroSignal Cordova eklentisi: native HeroSignal Android/iOS SDK'larını cordova.exec ile sarar. -->
+<!-- Pushizo Cordova eklentisi: native Pushizo Android/iOS SDK'larını cordova.exec ile sarar. -->
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
-        id="cordova-plugin-herosignal"
+        id="cordova-plugin-pushizo"
         version="0.1.0">
-    <name>HeroSignal</name>
-    <description>Push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (HeroSignal)</description>
+    <name>Pushizo</name>
+    <description>Push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Pushizo)</description>
     <license>MIT</license>
-    <keywords>push,notifications,fcm,apns,in-app,inbox,herosignal</keywords>
-    <repo>https://github.com/exec0de/herosignal.git</repo>
+    <keywords>push,notifications,fcm,apns,in-app,inbox,pushizo</keywords>
+    <repo>https://github.com/exec0de/pushizo.git</repo>
 
     <engines>
         <engine name="cordova" version=">=12.0.0" />
@@ -19,15 +19,15 @@
     <!-- JS katmanı (TypeScript kaynağı src/*.ts, `npm run build` ile www/ altına derlenir). -->
     <js-module src="www/core.js" name="core" />
     <js-module src="www/bridge.js" name="bridge" />
-    <js-module src="www/herosignal.js" name="HeroSignal">
-        <clobbers target="HeroSignal" />
-        <clobbers target="window.plugins.HeroSignal" />
+    <js-module src="www/pushizo.js" name="Pushizo">
+        <clobbers target="Pushizo" />
+        <clobbers target="window.plugins.Pushizo" />
     </js-module>
 
     <platform name="android">
         <config-file target="res/xml/config.xml" parent="/*">
-            <feature name="HeroSignal">
-                <param name="android-package" value="com.herosignal.cordova.HeroSignalCordovaPlugin" />
+            <feature name="Pushizo">
+                <param name="android-package" value="com.pushizo.cordova.PushizoCordovaPlugin" />
                 <!-- Soğuk başlatma tıklamasının kaçmaması için eklenti uygulama açılışında yüklenir. -->
                 <param name="onload" value="true" />
             </feature>
@@ -35,31 +35,31 @@
 
         <!--
           POST_NOTIFICATIONS, INTERNET, FCM servisi (com.google.firebase.MESSAGING_EVENT) ve bildirim açma
-          Activity'si HeroSignal Android SDK (AAR) manifestinden Gradle manifest birleştirmesiyle eklenir.
+          Activity'si Pushizo Android SDK (AAR) manifestinden Gradle manifest birleştirmesiyle eklenir.
         -->
         <config-file target="AndroidManifest.xml" parent="/manifest">
             <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
         </config-file>
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
             <provider
-                android:name="com.herosignal.cordova.HeroSignalInitProvider"
-                android:authorities="${applicationId}.herosignal-cordova-init"
+                android:name="com.pushizo.cordova.PushizoInitProvider"
+                android:authorities="${applicationId}.pushizo-cordova-init"
                 android:exported="false" />
         </config-file>
 
-        <source-file src="src/android/com/herosignal/cordova/HeroSignalCordovaPlugin.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
-        <source-file src="src/android/com/herosignal/cordova/HeroSignalBridgeCore.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
-        <source-file src="src/android/com/herosignal/cordova/HeroSignalConfigStore.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
-        <source-file src="src/android/com/herosignal/cordova/HeroSignalInitProvider.kt" target-dir="app/src/main/kotlin/com/herosignal/cordova" />
+        <source-file src="src/android/com/pushizo/cordova/PushizoCordovaPlugin.kt" target-dir="app/src/main/kotlin/com/pushizo/cordova" />
+        <source-file src="src/android/com/pushizo/cordova/PushizoBridgeCore.kt" target-dir="app/src/main/kotlin/com/pushizo/cordova" />
+        <source-file src="src/android/com/pushizo/cordova/PushizoConfigStore.kt" target-dir="app/src/main/kotlin/com/pushizo/cordova" />
+        <source-file src="src/android/com/pushizo/cordova/PushizoInitProvider.kt" target-dir="app/src/main/kotlin/com/pushizo/cordova" />
 
-        <framework src="src/android/herosignal.gradle" custom="true" type="gradleReference" />
-        <framework src="com.herosignal:herosignal-android:0.1.0" />
+        <framework src="src/android/pushizo.gradle" custom="true" type="gradleReference" />
+        <framework src="com.pushizo:pushizo-android:0.1.0" />
     </platform>
 
     <platform name="ios">
         <config-file target="config.xml" parent="/*">
-            <feature name="HeroSignal">
-                <param name="ios-package" value="HeroSignalCordovaPlugin" />
+            <feature name="Pushizo">
+                <param name="ios-package" value="PushizoCordovaPlugin" />
                 <param name="onload" value="true" />
             </feature>
         </config-file>
@@ -79,9 +79,9 @@
             <string>production</string>
         </config-file>
 
-        <source-file src="src/ios/HeroSignalCordovaPlugin.swift" />
-        <source-file src="src/ios/HeroSignalBridgeCore.swift" />
-        <source-file src="src/ios/HeroSignalAppDelegateHook.swift" />
+        <source-file src="src/ios/PushizoCordovaPlugin.swift" />
+        <source-file src="src/ios/PushizoBridgeCore.swift" />
+        <source-file src="src/ios/PushizoAppDelegateHook.swift" />
 
         <podspec>
             <config>
@@ -89,7 +89,7 @@
             </config>
             <pods use-frameworks="true">
                 <!-- Monorepo/yerel geliştirme: platforms/ios/Podfile içinde :path => '<repo>/sdk/ios' (README). -->
-                <pod name="HeroSignal" spec="~> 0.1.0" />
+                <pod name="Pushizo" spec="~> 0.1.0" />
             </pods>
         </podspec>
     </platform>
