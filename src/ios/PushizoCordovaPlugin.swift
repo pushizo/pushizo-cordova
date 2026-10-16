@@ -2,38 +2,38 @@
 import Cordova
 #endif
 import Foundation
-import HeroSignal
-#if canImport(HeroSignalCore)
-import HeroSignalCore
+import Pushizo
+#if canImport(PushizoCore)
+import PushizoCore
 #endif
 import UIKit
 
 /**
- Cordova → HeroSignal iOS SDK köprüsü (`cordova.exec` servisi "HeroSignal", `onload` ile uygulama açılışında
- yüklenir). Metotlar `HeroSignalBridgeCore` üzerinden SDK'ya iletilir. SDK olayları JS'in `setEventCallback`
+ Cordova → Pushizo iOS SDK köprüsü (`cordova.exec` servisi "Pushizo", `onload` ile uygulama açılışında
+ yüklenir). Metotlar `PushizoBridgeCore` üzerinden SDK'ya iletilir. SDK olayları JS'in `setEventCallback`
  ile açtığı tek `keepCallback` kanalından `{ type, payload }` olarak gönderilir; kanal açılmadan gelen olaylar
- tamponlanır. APNs token geri çağrıları `HeroSignalAppDelegateHook` ile yakalanır.
+ tamponlanır. APNs token geri çağrıları `PushizoAppDelegateHook` ile yakalanır.
  */
-@objc(HeroSignalCordovaPlugin)
-class HeroSignalCordovaPlugin: CDVPlugin {
+@objc(PushizoCordovaPlugin)
+class PushizoCordovaPlugin: CDVPlugin {
     // CDVCommandStatus üye adları cordova-ios sürümleri arasında farklı (Swift adı); ham değerler sabittir.
     private static let statusNoResult = CDVCommandStatus(rawValue: 0)!
     private static let statusOk = CDVCommandStatus(rawValue: 1)!
     private static let statusError = CDVCommandStatus(rawValue: 9)!
     private static let maxBufferedEvents = 50
 
-    private var core: HeroSignalBridgeCore!
+    private var core: PushizoBridgeCore!
     private var eventCallbackId: String?
     private var bufferedEvents: [[String: Any]] = []
 
     override func pluginInitialize() {
         super.pluginInitialize()
-        core = HeroSignalBridgeCore { [weak self] type, payload in
+        core = PushizoBridgeCore { [weak self] type, payload in
             DispatchQueue.main.async { self?.sendEvent(["type": type, "payload": payload]) }
         }
-        HeroSignalAppDelegateHook.install()
+        PushizoAppDelegateHook.install()
         // Daha önce JS ile başlatıldıysa SDK hemen kayıtlı ayarlarla başlatılır; bildirimden açılış tıklaması kaybolmaz.
-        if !HeroSignal.isInitialized, let config = HeroSignalBridgeConfig.load() {
+        if !Pushizo.isInitialized, let config = PushizoBridgeConfig.load() {
             config.initializeSdk()
         }
         core.attachIfInitialized()
@@ -86,7 +86,7 @@ class HeroSignalCordovaPlugin: CDVPlugin {
             self.commandDelegate.send(pluginResult, callbackId: callbackId)
         }
         if !handled {
-            let error = CDVPluginResult(status: Self.statusError, messageAs: ["code": "NOT_IMPLEMENTED", "message": "HeroSignal: \(command.methodName ?? "") desteklenmiyor"])
+            let error = CDVPluginResult(status: Self.statusError, messageAs: ["code": "NOT_IMPLEMENTED", "message": "Pushizo: \(command.methodName ?? "") desteklenmiyor"])
             commandDelegate.send(error, callbackId: callbackId)
         }
     }

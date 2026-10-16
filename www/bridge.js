@@ -1,32 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.HeroSignalError = void 0;
+exports.PushizoError = void 0;
 exports.cordovaBridge = cordovaBridge;
-/** Native servis adı (`plugin.xml` <feature name="HeroSignal">). */
-const SERVICE = 'HeroSignal';
+/** Native servis adı (`plugin.xml` <feature name="Pushizo">). */
+const SERVICE = 'Pushizo';
 /** Native hatası; `code` sunucu/SDK hata kodudur (INVALID_ARGUMENT, NOT_READY, NOT_FOUND, …). */
-class HeroSignalError extends Error {
+class PushizoError extends Error {
     constructor(message, code) {
         super(message);
         this.code = code;
-        this.name = 'HeroSignalError';
+        this.name = 'PushizoError';
     }
 }
-exports.HeroSignalError = HeroSignalError;
+exports.PushizoError = PushizoError;
 function toError(raw) {
     if (raw && typeof raw === 'object') {
         const r = raw;
         const code = typeof r.code === 'string' ? r.code : 'HS_ERROR';
-        return new HeroSignalError(typeof r.message === 'string' ? r.message : code, code);
+        return new PushizoError(typeof r.message === 'string' ? r.message : code, code);
     }
-    return new HeroSignalError(typeof raw === 'string' ? raw : 'HeroSignal hatası', 'HS_ERROR');
+    return new PushizoError(typeof raw === 'string' ? raw : 'Pushizo hatası', 'HS_ERROR');
 }
 function resolveExec() {
     var _a;
     const g = globalThis;
     const exec = (_a = g.cordova) === null || _a === void 0 ? void 0 : _a.exec;
     if (typeof exec !== 'function') {
-        throw new HeroSignalError('cordova.exec bulunamadı; `deviceready` olayından sonra çağırın.', 'NOT_READY');
+        throw new PushizoError('cordova.exec bulunamadı; `deviceready` olayından sonra çağırın.', 'NOT_READY');
     }
     return exec;
 }
@@ -55,7 +55,7 @@ function cordovaBridge() {
                 const m = message;
                 if (m.type)
                     handler(m.type, (_a = m.payload) !== null && _a !== void 0 ? _a : {});
-            }, (error) => console.error('[HeroSignal] olay kanalı hatası', error), SERVICE, 'setEventCallback', []);
+            }, (error) => console.error('[Pushizo] olay kanalı hatası', error), SERVICE, 'setEventCallback', []);
         },
     };
 }

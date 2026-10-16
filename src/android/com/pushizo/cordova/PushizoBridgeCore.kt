@@ -1,4 +1,4 @@
-package com.herosignal.cordova
+package com.pushizo.cordova
 
 import android.Manifest
 import android.app.Activity
@@ -6,33 +6,33 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import com.herosignal.sdk.HeroSignal
-import com.herosignal.sdk.HsApiException
-import com.herosignal.sdk.HsCallback
-import com.herosignal.sdk.HsClickEvent
-import com.herosignal.sdk.HsForegroundEvent
-import com.herosignal.sdk.HsInAppClickEvent
-import com.herosignal.sdk.HsInAppLifecycleEvent
-import com.herosignal.sdk.HsInAppLifecycleListener
-import com.herosignal.sdk.HsInboxItem
-import com.herosignal.sdk.HsInboxPage
-import com.herosignal.sdk.HsLog
-import com.herosignal.sdk.HsMessageCategory
-import com.herosignal.sdk.HsNotification
-import com.herosignal.sdk.HsPreference
-import com.herosignal.sdk.HsPreferenceInput
-import com.herosignal.sdk.HsPreferencesResult
-import com.herosignal.sdk.HsPushSubscriptionState
+import com.pushizo.sdk.Pushizo
+import com.pushizo.sdk.HsApiException
+import com.pushizo.sdk.HsCallback
+import com.pushizo.sdk.HsClickEvent
+import com.pushizo.sdk.HsForegroundEvent
+import com.pushizo.sdk.HsInAppClickEvent
+import com.pushizo.sdk.HsInAppLifecycleEvent
+import com.pushizo.sdk.HsInAppLifecycleListener
+import com.pushizo.sdk.HsInboxItem
+import com.pushizo.sdk.HsInboxPage
+import com.pushizo.sdk.HsLog
+import com.pushizo.sdk.HsMessageCategory
+import com.pushizo.sdk.HsNotification
+import com.pushizo.sdk.HsPreference
+import com.pushizo.sdk.HsPreferenceInput
+import com.pushizo.sdk.HsPreferencesResult
+import com.pushizo.sdk.HsPushSubscriptionState
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Köprüden bağımsız Android çekirdeği: JS metot adlarını HeroSignal Android SDK çağrılarına çevirir,
+ * Köprüden bağımsız Android çekirdeği: JS metot adlarını Pushizo Android SDK çağrılarına çevirir,
  * SDK olaylarını `emit(tür, veri)` ile köprüye iletir. Cordova eklentisi bu sınıfı sarar.
  */
-internal class HeroSignalBridgeCore(
+internal class PushizoBridgeCore(
     private val context: Context,
     private val emit: (type: String, payload: JSONObject) -> Unit,
 ) {
@@ -91,28 +91,28 @@ internal class HeroSignalBridgeCore(
 
     /** SDK zaten başlatıldıysa (kayıtlı ayarlarla süreç başında) dinleyicileri bağlar. */
     fun attachIfInitialized() {
-        if (HeroSignal.isInitialized) registerListeners()
+        if (Pushizo.isInitialized) registerListeners()
     }
 
     /** SDK dinleyicileri bir kez eklenir; soğuk başlatma tıklaması ilk tıklama dinleyicisine teslim edilir. */
     private fun registerListeners() {
         if (!listenersRegistered.compareAndSet(false, true)) return
-        HeroSignal.Notifications.addClickListener(clickListener)
-        HeroSignal.Notifications.addForegroundLifecycleListener(foregroundListener)
-        HeroSignal.User.pushSubscription.addObserver(subscriptionObserver)
-        HeroSignal.Notifications.addPermissionObserver(permissionObserver)
-        HeroSignal.InAppMessages.addClickListener(inAppClickListener)
-        HeroSignal.InAppMessages.addLifecycleListener(inAppLifecycleListener)
+        Pushizo.Notifications.addClickListener(clickListener)
+        Pushizo.Notifications.addForegroundLifecycleListener(foregroundListener)
+        Pushizo.User.pushSubscription.addObserver(subscriptionObserver)
+        Pushizo.Notifications.addPermissionObserver(permissionObserver)
+        Pushizo.InAppMessages.addClickListener(inAppClickListener)
+        Pushizo.InAppMessages.addLifecycleListener(inAppLifecycleListener)
     }
 
     fun detach() {
         if (!listenersRegistered.compareAndSet(true, false)) return
-        HeroSignal.Notifications.removeClickListener(clickListener)
-        HeroSignal.Notifications.removeForegroundLifecycleListener(foregroundListener)
-        HeroSignal.User.pushSubscription.removeObserver(subscriptionObserver)
-        HeroSignal.Notifications.removePermissionObserver(permissionObserver)
-        HeroSignal.InAppMessages.removeClickListener(inAppClickListener)
-        HeroSignal.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
+        Pushizo.Notifications.removeClickListener(clickListener)
+        Pushizo.Notifications.removeForegroundLifecycleListener(foregroundListener)
+        Pushizo.User.pushSubscription.removeObserver(subscriptionObserver)
+        Pushizo.Notifications.removePermissionObserver(permissionObserver)
+        Pushizo.InAppMessages.removeClickListener(inAppClickListener)
+        Pushizo.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
         // Bekleyen ön plan bildirimleri kaybolmasın diye gösterilir.
         val pending = synchronized(pendingForeground) { pendingForeground.values.toList().also { pendingForeground.clear() } }
         pending.forEach { it.display() }
@@ -120,10 +120,10 @@ internal class HeroSignalBridgeCore(
 
     /** İzin isteği sonuçlandı: SDK aboneliği günceller; izin değiştiyse yerel izin gözlemcisi olayı gönderir. */
     fun onPermissionResult() {
-        HeroSignal.Notifications.onPermissionResult()
+        Pushizo.Notifications.onPermissionResult()
     }
 
-    fun permissionJson(): JSONObject = JSONObject().put("permission", HeroSignal.Notifications.permission)
+    fun permissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Notifications.permission)
 
     // --- Konum izni (v2 Faz 17b) ---
 
@@ -135,11 +135,11 @@ internal class HeroSignalBridgeCore(
      * API'si üzerinden sistem izni istenir — sonuç geldiğinde köprü [onLocationPermissionResult] yanıtını döndürür.
      */
     fun requestLocationPermission(activity: Activity?, args: JSONObject, reply: Reply, requestSystem: (Array<String>) -> Unit) {
-        if (!HeroSignal.isInitialized) {
+        if (!Pushizo.isInitialized) {
             reply.error("NOT_READY", NOT_INITIALIZED)
             return
         }
-        if (HeroSignal.Location.permissionGranted) {
+        if (Pushizo.Location.permissionGranted) {
             reply.success(onLocationPermissionResult())
             return
         }
@@ -161,10 +161,10 @@ internal class HeroSignalBridgeCore(
                 return@runOnUiThread
             }
             AlertDialog.Builder(activity)
-                .setTitle(com.herosignal.sdk.R.string.hs_location_rationale_title)
-                .setMessage(rationale ?: activity.getString(com.herosignal.sdk.R.string.hs_location_rationale_message))
-                .setPositiveButton(com.herosignal.sdk.R.string.hs_location_rationale_continue) { _, _ -> requestSystem(permissions) }
-                .setNegativeButton(com.herosignal.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(locationPermissionJson()) }
+                .setTitle(com.pushizo.sdk.R.string.hs_location_rationale_title)
+                .setMessage(rationale ?: activity.getString(com.pushizo.sdk.R.string.hs_location_rationale_message))
+                .setPositiveButton(com.pushizo.sdk.R.string.hs_location_rationale_continue) { _, _ -> requestSystem(permissions) }
+                .setNegativeButton(com.pushizo.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(locationPermissionJson()) }
                 .setOnCancelListener { reply.success(locationPermissionJson()) }
                 .show()
         }
@@ -172,11 +172,11 @@ internal class HeroSignalBridgeCore(
 
     /** Sistem izin sonucu: SDK bilgilendirilir (izin verildiyse ve paylaşım açıksa konum gönderilir), güncel izin döner. */
     fun onLocationPermissionResult(): JSONObject {
-        HeroSignal.Location.onPermissionResult()
+        Pushizo.Location.onPermissionResult()
         return locationPermissionJson()
     }
 
-    fun locationPermissionJson(): JSONObject = JSONObject().put("permission", HeroSignal.Location.permissionGranted)
+    fun locationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.permissionGranted)
 
     /** Uygulama manifest'inde tanımlı konum izinleri (eklenti izinleri otomatik eklemez; README "Konum"). */
     private fun declaredLocationPermissions(): Array<String> {
@@ -203,51 +203,51 @@ internal class HeroSignalBridgeCore(
         try {
             when (method) {
                 "initialize" -> {
-                    val config = HeroSignalConfigStore.Config(
+                    val config = PushizoConfigStore.Config(
                         appId = args.requireString("appId"),
-                        apiUrl = args.optStringOrNull("apiUrl") ?: HeroSignal.Options().apiUrl,
+                        apiUrl = args.optStringOrNull("apiUrl") ?: Pushizo.Options().apiUrl,
                         requiresPrivacyConsent = args.optBoolean("requiresPrivacyConsent", false),
                         logLevel = args.optStringOrNull("logLevel") ?: "warn",
                     )
                     // Süreç yeniden başladığında (bildirim tıklaması, FCM servisi) SDK erkenden başlatılabilsin diye saklanır.
-                    HeroSignalConfigStore.save(context, config)
-                    HeroSignal.initialize(context, config.appId, config.toOptions())
+                    PushizoConfigStore.save(context, config)
+                    Pushizo.initialize(context, config.appId, config.toOptions())
                     registerListeners()
                     reply.success(null)
                 }
-                "setConsentGiven" -> { HeroSignal.setConsentGiven(args.optBoolean("given", false)); reply.success(null) }
+                "setConsentGiven" -> { Pushizo.setConsentGiven(args.optBoolean("given", false)); reply.success(null) }
                 "login" -> {
-                    HeroSignal.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    Pushizo.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
                     reply.success(null)
                 }
-                "updateUserJwt" -> { HeroSignal.updateUserJwt(args.requireString("jwt")); reply.success(null) }
-                "logout" -> { HeroSignal.logout(); reply.success(null) }
+                "updateUserJwt" -> { Pushizo.updateUserJwt(args.requireString("jwt")); reply.success(null) }
+                "logout" -> { Pushizo.logout(); reply.success(null) }
 
-                "addTags" -> { HeroSignal.User.addTags(args.stringMap("tags")); reply.success(null) }
-                "removeTags" -> { HeroSignal.User.removeTags(args.stringList("keys")); reply.success(null) }
-                "getTags" -> reply.success(JSONObject().put("tags", JSONObject(HeroSignal.User.getTags())))
-                "addAliases" -> { HeroSignal.User.addAliases(args.stringMap("aliases")); reply.success(null) }
-                "removeAlias" -> { HeroSignal.User.removeAlias(args.requireString("label")); reply.success(null) }
-                "setLanguage" -> { HeroSignal.User.setLanguage(args.requireString("code")); reply.success(null) }
+                "addTags" -> { Pushizo.User.addTags(args.stringMap("tags")); reply.success(null) }
+                "removeTags" -> { Pushizo.User.removeTags(args.stringList("keys")); reply.success(null) }
+                "getTags" -> reply.success(JSONObject().put("tags", JSONObject(Pushizo.User.getTags())))
+                "addAliases" -> { Pushizo.User.addAliases(args.stringMap("aliases")); reply.success(null) }
+                "removeAlias" -> { Pushizo.User.removeAlias(args.requireString("label")); reply.success(null) }
+                "setLanguage" -> { Pushizo.User.setLanguage(args.requireString("code")); reply.success(null) }
                 // Geçersiz adres → IllegalArgumentException → INVALID_ARGUMENT
-                "addEmail" -> { HeroSignal.User.addEmail(args.requireString("email")); reply.success(null) }
-                "removeEmail" -> { HeroSignal.User.removeEmail(args.requireString("email")); reply.success(null) }
-                "addSms" -> { HeroSignal.User.addSms(args.requireString("phoneNumber")); reply.success(null) }
-                "removeSms" -> { HeroSignal.User.removeSms(args.requireString("phoneNumber")); reply.success(null) }
-                "getUser" -> reply.success(JSONObject().put("id", HeroSignal.User.id.orNull()).put("externalId", HeroSignal.User.externalId.orNull()))
+                "addEmail" -> { Pushizo.User.addEmail(args.requireString("email")); reply.success(null) }
+                "removeEmail" -> { Pushizo.User.removeEmail(args.requireString("email")); reply.success(null) }
+                "addSms" -> { Pushizo.User.addSms(args.requireString("phoneNumber")); reply.success(null) }
+                "removeSms" -> { Pushizo.User.removeSms(args.requireString("phoneNumber")); reply.success(null) }
+                "getUser" -> reply.success(JSONObject().put("id", Pushizo.User.id.orNull()).put("externalId", Pushizo.User.externalId.orNull()))
                 "getContacts" -> reply.success(
-                    JSONObject().put("emails", JSONArray(HeroSignal.User.emails)).put("smsNumbers", JSONArray(HeroSignal.User.smsNumbers)),
+                    JSONObject().put("emails", JSONArray(Pushizo.User.emails)).put("smsNumbers", JSONArray(Pushizo.User.smsNumbers)),
                 )
                 // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
-                "getPreferences" -> HeroSignal.User.getPreferences(callback(reply) { it.toJson() })
-                "setPreferences" -> HeroSignal.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
+                "getPreferences" -> Pushizo.User.getPreferences(callback(reply) { it.toJson() })
+                "setPreferences" -> Pushizo.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
 
-                "getPushSubscription" -> reply.success(HeroSignal.User.pushSubscription.state.toJson())
-                "optIn" -> { HeroSignal.User.pushSubscription.optIn(); reply.success(null) }
-                "optOut" -> { HeroSignal.User.pushSubscription.optOut(); reply.success(null) }
+                "getPushSubscription" -> reply.success(Pushizo.User.pushSubscription.state.toJson())
+                "optIn" -> { Pushizo.User.pushSubscription.optIn(); reply.success(null) }
+                "optOut" -> { Pushizo.User.pushSubscription.optOut(); reply.success(null) }
 
                 "getPermission" -> reply.success(permissionJson())
-                "clearAll" -> { HeroSignal.Notifications.clearAll(); reply.success(null) }
+                "clearAll" -> { Pushizo.Notifications.clearAll(); reply.success(null) }
                 "removeNotification" -> {
                     // Android tepsi kimliği tamsayıdır; metin kimlik (iOS biçimi) yalnızca sayıysa kabul edilir.
                     val id = when {
@@ -255,10 +255,10 @@ internal class HeroSignalBridgeCore(
                         else -> args.optStringOrNull("identifier")?.trim()?.toIntOrNull()
                             ?: throw IllegalArgumentException("id gerekli (Android bildirim kimliği tamsayıdır)")
                     }
-                    HeroSignal.Notifications.removeNotification(id)
+                    Pushizo.Notifications.removeNotification(id)
                     reply.success(null)
                 }
-                "removeGroupedNotifications" -> { HeroSignal.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }
+                "removeGroupedNotifications" -> { Pushizo.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }
                 "setForegroundHandlerEnabled" -> { foregroundHandlerEnabled = args.optBoolean("enabled", false); reply.success(null) }
                 "displayNotification" -> {
                     val id = args.requireString("notificationId")
@@ -273,32 +273,32 @@ internal class HeroSignalBridgeCore(
 
                 "sendEvent" -> {
                     val value = if (args.has("value") && !args.isNull("value")) args.getDouble("value") else null
-                    HeroSignal.Session.sendEvent(args.requireString("name"), args.optJSONObject("properties")?.toMap() ?: emptyMap(), value)
+                    Pushizo.Session.sendEvent(args.requireString("name"), args.optJSONObject("properties")?.toMap() ?: emptyMap(), value)
                     reply.success(null)
                 }
-                "setLogLevel" -> { HeroSignal.Debug.setLogLevel(logLevel(args.optStringOrNull("level"))); reply.success(null) }
+                "setLogLevel" -> { Pushizo.Debug.setLogLevel(logLevel(args.optStringOrNull("level"))); reply.success(null) }
 
-                "addTriggers" -> { HeroSignal.InAppMessages.addTriggers(args.stringMap("triggers")); reply.success(null) }
-                "removeTriggers" -> { HeroSignal.InAppMessages.removeTriggers(args.stringList("keys")); reply.success(null) }
-                "clearTriggers" -> { HeroSignal.InAppMessages.clearTriggers(); reply.success(null) }
-                "getTriggers" -> reply.success(JSONObject().put("triggers", JSONObject(HeroSignal.InAppMessages.getTriggers())))
-                "setScreen" -> { HeroSignal.InAppMessages.setScreen(args.optStringOrNull("name")); reply.success(null) }
-                "setInAppPaused" -> { HeroSignal.InAppMessages.paused = args.optBoolean("paused", false); reply.success(null) }
-                "getInAppPaused" -> reply.success(JSONObject().put("paused", HeroSignal.InAppMessages.paused))
+                "addTriggers" -> { Pushizo.InAppMessages.addTriggers(args.stringMap("triggers")); reply.success(null) }
+                "removeTriggers" -> { Pushizo.InAppMessages.removeTriggers(args.stringList("keys")); reply.success(null) }
+                "clearTriggers" -> { Pushizo.InAppMessages.clearTriggers(); reply.success(null) }
+                "getTriggers" -> reply.success(JSONObject().put("triggers", JSONObject(Pushizo.InAppMessages.getTriggers())))
+                "setScreen" -> { Pushizo.InAppMessages.setScreen(args.optStringOrNull("name")); reply.success(null) }
+                "setInAppPaused" -> { Pushizo.InAppMessages.paused = args.optBoolean("paused", false); reply.success(null) }
+                "getInAppPaused" -> reply.success(JSONObject().put("paused", Pushizo.InAppMessages.paused))
 
-                "inboxList" -> HeroSignal.Inbox.list(args.optInt("limit", 50), args.optStringOrNull("cursor"), callback(reply) { it.toJson() })
-                "inboxMarkRead" -> HeroSignal.Inbox.markRead(args.requireString("id"), callback(reply) { it.toJson() })
-                "inboxMarkAllRead" -> HeroSignal.Inbox.markAllRead(callback(reply) { JSONObject().put("unreadCount", it) })
-                "inboxArchive" -> HeroSignal.Inbox.archive(args.requireString("id"), callback(reply) { null })
-                "inboxUnreadCount" -> HeroSignal.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
+                "inboxList" -> Pushizo.Inbox.list(args.optInt("limit", 50), args.optStringOrNull("cursor"), callback(reply) { it.toJson() })
+                "inboxMarkRead" -> Pushizo.Inbox.markRead(args.requireString("id"), callback(reply) { it.toJson() })
+                "inboxMarkAllRead" -> Pushizo.Inbox.markAllRead(callback(reply) { JSONObject().put("unreadCount", it) })
+                "inboxArchive" -> Pushizo.Inbox.archive(args.requireString("id"), callback(reply) { null })
+                "inboxUnreadCount" -> Pushizo.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
 
                 // Konum (v2 Faz 17b): izin isteği Activity gerektirdiğinden köprü sınıfında ele alınır.
                 "setLocationShared" -> {
-                    check(HeroSignal.isInitialized) { NOT_INITIALIZED }
-                    HeroSignal.Location.setShared(args.optBoolean("shared", false))
+                    check(Pushizo.isInitialized) { NOT_INITIALIZED }
+                    Pushizo.Location.setShared(args.optBoolean("shared", false))
                     reply.success(null)
                 }
-                "isLocationShared" -> reply.success(JSONObject().put("shared", HeroSignal.Location.isShared))
+                "isLocationShared" -> reply.success(JSONObject().put("shared", Pushizo.Location.isShared))
 
                 // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
                 "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
@@ -333,7 +333,7 @@ internal class HeroSignalBridgeCore(
 
     companion object {
         private const val MAX_PENDING_FOREGROUND = 32
-        private const val NOT_INITIALIZED = "Önce HeroSignal.initialize çağrılmalı"
+        private const val NOT_INITIALIZED = "Önce Pushizo.initialize çağrılmalı"
         private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         private const val LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"
         private const val LIVE_ACTIVITY_UNSUPPORTED_MESSAGE = "Live Activities yalnızca iOS'ta desteklenir"

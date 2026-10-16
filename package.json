@@ -1,13 +1,13 @@
 {
-  "name": "cordova-plugin-herosignal",
+  "name": "cordova-plugin-pushizo",
   "version": "0.1.0",
-  "description": "HeroSignal Cordova eklentisi: push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Android + iOS)",
+  "description": "Pushizo Cordova eklentisi: push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Android + iOS)",
   "license": "MIT",
-  "author": "HeroSignal <sdk@herosignal.dev>",
-  "homepage": "https://github.com/exec0de/herosignal",
+  "author": "Pushizo <bildirim@pushizo.com>",
+  "homepage": "https://github.com/exec0de/pushizo",
   "repository": {
     "type": "git",
-    "url": "https://github.com/exec0de/herosignal.git",
+    "url": "https://github.com/exec0de/pushizo.git",
     "directory": "sdk/cordova"
   },
   "keywords": [
@@ -17,7 +17,7 @@
     "cordova-ios",
     "push",
     "notifications",
-    "herosignal"
+    "pushizo"
   ],
   "types": "types/index.d.ts",
   "files": [
@@ -29,7 +29,7 @@
     "README.md"
   ],
   "cordova": {
-    "id": "cordova-plugin-herosignal",
+    "id": "cordova-plugin-pushizo",
     "platforms": [
       "android",
       "ios"

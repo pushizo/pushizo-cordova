@@ -1,8 +1,8 @@
-package com.herosignal.cordova
+package com.pushizo.cordova
 
 import android.Manifest
 import android.os.Build
-import com.herosignal.sdk.HeroSignal
+import com.pushizo.sdk.Pushizo
 import org.apache.cordova.CallbackContext
 import org.apache.cordova.CordovaPlugin
 import org.apache.cordova.PluginResult
@@ -10,12 +10,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Cordova → HeroSignal Android SDK köprüsü (`cordova.exec` servisi "HeroSignal"). Metotlar
- * [HeroSignalBridgeCore] üzerinden SDK'ya iletilir. SDK olayları JS'in `setEventCallback` ile açtığı tek
+ * Cordova → Pushizo Android SDK köprüsü (`cordova.exec` servisi "Pushizo"). Metotlar
+ * [PushizoBridgeCore] üzerinden SDK'ya iletilir. SDK olayları JS'in `setEventCallback` ile açtığı tek
  * `keepCallback` kanalından `{ type, payload }` olarak gönderilir; kanal açılmadan gelen olaylar tamponlanır.
  */
-class HeroSignalCordovaPlugin : CordovaPlugin() {
-    private lateinit var core: HeroSignalBridgeCore
+class PushizoCordovaPlugin : CordovaPlugin() {
+    private lateinit var core: PushizoBridgeCore
     private val lock = Any()
     private var eventCallback: CallbackContext? = null
     private val bufferedEvents = ArrayDeque<JSONObject>()
@@ -23,7 +23,7 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
     private var pendingLocationPermission: CallbackContext? = null
 
     override fun pluginInitialize() {
-        core = HeroSignalBridgeCore(cordova.activity.applicationContext) { type, payload -> sendEvent(type, payload) }
+        core = PushizoBridgeCore(cordova.activity.applicationContext) { type, payload -> sendEvent(type, payload) }
         core.attachIfInitialized()
     }
 
@@ -37,7 +37,7 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
         return true
     }
 
-    private fun reply(callbackContext: CallbackContext) = object : HeroSignalBridgeCore.Reply {
+    private fun reply(callbackContext: CallbackContext) = object : PushizoBridgeCore.Reply {
         override fun success(data: JSONObject?) {
             if (data == null) callbackContext.success() else callbackContext.success(data)
         }
@@ -91,15 +91,15 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
     }
 
     /**
-     * Konum izni (v2 Faz 17b): açıklama diyaloğu ve manifest denetimi [HeroSignalBridgeCore] içindedir; "Devam" seçilirse
-     * sistem izni `HeroSignal.Location.PERMISSION_REQUEST_CODE` ile istenir, sonuç [onRequestPermissionsResult] ile döner.
+     * Konum izni (v2 Faz 17b): açıklama diyaloğu ve manifest denetimi [PushizoBridgeCore] içindedir; "Devam" seçilirse
+     * sistem izni `Pushizo.Location.PERMISSION_REQUEST_CODE` ile istenir, sonuç [onRequestPermissionsResult] ile döner.
      */
     private fun requestLocationPermission(args: JSONObject, callbackContext: CallbackContext) {
         core.requestLocationPermission(cordova.activity, args, reply(callbackContext)) { permissions ->
             // Yanıtsız kalan önceki istek güncel izin durumuyla kapatılır.
             val previous = synchronized(lock) { pendingLocationPermission.also { pendingLocationPermission = callbackContext } }
             previous?.success(core.locationPermissionJson())
-            cordova.requestPermissions(this, HeroSignal.Location.PERMISSION_REQUEST_CODE, permissions)
+            cordova.requestPermissions(this, Pushizo.Location.PERMISSION_REQUEST_CODE, permissions)
         }
     }
 
@@ -111,7 +111,7 @@ class HeroSignalCordovaPlugin : CordovaPlugin() {
                 // Sonuç sistem durumundan okunur (izin verilse de bildirimler uygulama ayarından kapalı olabilir).
                 callback.success(core.permissionJson())
             }
-            HeroSignal.Location.PERMISSION_REQUEST_CODE -> {
+            Pushizo.Location.PERMISSION_REQUEST_CODE -> {
                 // SDK bilgilendirilir (izin verildiyse ve paylaşım açıksa konum gönderilir); sonuç sistem durumundan okunur.
                 val result = core.onLocationPermissionResult()
                 val callback = synchronized(lock) { pendingLocationPermission.also { pendingLocationPermission = null } } ?: return
