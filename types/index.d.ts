@@ -30,6 +30,19 @@ declare namespace Pushizo {
   type PreferenceCategory = Definitions.PreferenceCategory;
   type UserPreferences = Definitions.UserPreferences;
   type PreferenceInput = Definitions.PreferenceInput;
+  type ChatMessage = Definitions.ChatMessage;
+  type ChatAttachment = Definitions.ChatAttachment;
+  type ChatQuickReply = Definitions.ChatQuickReply;
+  type ChatConversation = Definitions.ChatConversation;
+  type ChatConversationState = Definitions.ChatConversationState;
+  type ChatMessagePage = Definitions.ChatMessagePage;
+  type ChatIdentifyResult = Definitions.ChatIdentifyResult;
+  type ChatConfig = Definitions.ChatConfig;
+  type ChatStartOptions = Definitions.ChatStartOptions;
+  type ChatMessagesOptions = Definitions.ChatMessagesOptions;
+  type ChatAttachmentSource = Definitions.ChatAttachmentSource;
+  type ChatAttachmentOptions = Definitions.ChatAttachmentOptions;
+  type ChatEventMap = Definitions.ChatEventMap;
 }
 
 export = Pushizo;

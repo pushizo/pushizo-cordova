@@ -1,6 +1,6 @@
-import type { ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
-export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle';
+export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
 export interface Bridge {
     call<T = void>(method: string, args?: Record<string, unknown>): Promise<T>;
@@ -23,6 +23,10 @@ export declare class PushizoCore {
     private readonly inAppLifecycleListeners;
     /** Dinleyici yokken gelen tıklamalar (soğuk başlatma); ilk dinleyiciye teslim edilir. */
     private readonly pendingClicks;
+    /** Canlı sohbet dinleyicileri (tür başına). */
+    private readonly chatListeners;
+    /** Dinleyici yokken gelen sohbet bildirimi tıklamaları (soğuk başlatma). */
+    private readonly pendingChatOpens;
     private foregroundFlag;
     constructor(bridge: Bridge);
     /** Native olaylarına bir kez abone olur (initialize veya ilk dinleyicide). */
@@ -144,6 +148,53 @@ export declare class PushizoCore {
         archive: (id: string) => Promise<void>;
         unreadCount: () => Promise<number>;
     };
+    /**
+     * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
+     * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.
+     */
+    readonly Chat: {
+        /** Sohbeti etkinleştirir ve ziyaretçiyi bağlar (giriş yapmış kullanıcı, push aboneliği); konuşma varsa döner. */
+        start: (options?: ChatStartOptions) => Promise<ChatIdentifyResult>;
+        /** Widget ayarları, çevrimiçi durumu, çevrimdışı metni ve ek sınırları. */
+        getConfig: (language?: string) => Promise<ChatConfig>;
+        /** Konuşma (yoksa null) ve okunmamış sayısı. */
+        getConversation: () => Promise<ChatConversationState>;
+        /** Mesajlar (kronolojik): parametresiz en yeni `limit`; `afterSeq` sonrakiler, `beforeSeq` daha eski geçmiş. */
+        getMessages: (options?: ChatMessagesOptions) => Promise<ChatMessagePage>;
+        /**
+         * Mesaj gönderir (ilk mesaj konuşmayı açar); `optionId` bot sorusunda seçilen hızlı yanıttır. Ağ yoksa mesaj native
+         * kuyruğa alınır ve `pending` mesaj döner; gönderilince `message` olayıyla sunucu kopyası gelir.
+         */
+        sendMessage: (text: string, options?: {
+            optionId?: string;
+        }) => Promise<ChatMessage>;
+        /** Ek gönderir (PNG/JPEG/WebP/GIF/PDF/düz metin, en çok 10 MB). */
+        sendAttachment: (source: ChatAttachmentSource, options: ChatAttachmentOptions) => Promise<ChatMessage>;
+        /** `seq` numarasına kadar okundu işaretler; kalan okunmamış sayısını döndürür. */
+        markRead: (seq: number) => Promise<number>;
+        /** Okunmamış sayısını sunucudan yeniler. */
+        refreshUnreadCount: () => Promise<number>;
+        /** Son bilinen okunmamış sayısı (ağ çağrısı yok). */
+        getUnreadCount: () => Promise<number>;
+        /** Çevrimdışı / çalışma saatleri dışında e-postayla mesaj bırakır. */
+        leaveOfflineMessage: (email: string, text: string, name?: string) => Promise<ChatMessage>;
+        /** Yazıyor göstergesi (native SDK tekrarları seyreltir). */
+        setTyping: (typing: boolean) => Promise<void>;
+        /** Canlı dinlemeyi başlatır; koparsa native SDK geri çekilmeyle yeniden bağlanır ve eksikleri yoklar. */
+        startListening: () => Promise<void>;
+        /** Canlı dinlemeyi durdurur (arka plana geçişte önerilir; temsilci mesajı push ile gelir). */
+        stopListening: () => Promise<void>;
+        /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
+        attachmentUrl: (attachmentId: string, download?: boolean) => Promise<string>;
+        /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
+        getVisitorId: () => Promise<string | null>;
+        /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
+        addEventListener: <K extends keyof ChatEventMap>(event: K, listener: Listener<ChatEventMap[K]>) => (() => void);
+        removeEventListener: <K extends keyof ChatEventMap>(event: K, listener: Listener<ChatEventMap[K]>) => void;
+    };
+    /** Native sohbet olayını türüne göre dağıtır. */
+    private onChatEvent;
+    private onChatOpen;
     /**
      * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
      * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı

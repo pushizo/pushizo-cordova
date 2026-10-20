@@ -163,3 +163,132 @@ export interface RawInAppLifecycleEvent {
         id: string;
     };
 }
+export interface ChatAttachment {
+    id: string;
+    name: string;
+    type: string;
+    size: number;
+}
+export interface ChatQuickReply {
+    id: string;
+    label: string;
+}
+/** Sohbet mesajı; çevrimdışı kuyrukta bekleyen yerel mesajda `seq` 0 ve `status` `pending`. */
+export interface ChatMessage {
+    /** Sunucu kimliği; bekleyen yerel mesajda null. */
+    id: string | null;
+    seq: number;
+    clientMessageId: string | null;
+    sender: 'visitor' | 'agent' | 'bot' | 'system';
+    authorName: string | null;
+    text: string | null;
+    attachments: ChatAttachment[];
+    /** Bot sorusunun seçenekleri (yoksa null); seçim `Chat.sendMessage(label, { optionId })`. */
+    quickReplies: ChatQuickReply[] | null;
+    status: 'pending' | 'sent' | 'delivered' | 'read';
+    /** Epoch milisaniye. */
+    createdAt: number | null;
+}
+export interface ChatConversation {
+    id: string;
+    status: string;
+    lastSeq: number;
+    /** Temsilcinin okuduğu son sıra (ziyaretçi mesajlarında "okundu"). */
+    agentLastReadSeq: number;
+    visitorLastReadSeq: number;
+    unreadCount: number;
+    botActive: boolean;
+    assigneeName: string | null;
+    createdAt: number | null;
+}
+export interface ChatConversationState {
+    conversation: ChatConversation | null;
+    unreadCount: number;
+}
+export interface ChatMessagePage {
+    messages: ChatMessage[];
+    hasMore: boolean;
+}
+export interface ChatIdentifyResult {
+    userId: string | null;
+    conversation: ChatConversation | null;
+}
+export interface ChatConfig {
+    enabled: boolean;
+    /** Çalışma saatleri içinde ve en az bir temsilci (veya bot) çevrimiçi. */
+    online: boolean;
+    withinBusinessHours: boolean;
+    color: string | null;
+    textColor: string | null;
+    position: string;
+    theme: string;
+    title: string | null;
+    greeting: string | null;
+    offlineMessage: string | null;
+    collectEmailOffline: boolean;
+    requireEmail: boolean;
+    attachmentsEnabled: boolean;
+    attachmentMaxBytes: number;
+    attachmentTypes: string[];
+    language: string;
+}
+export interface ChatStartOptions {
+    name?: string;
+    email?: string;
+    language?: string;
+}
+export interface ChatMessagesOptions {
+    /** Bu sıradan sonraki mesajlar (eksik tamamlama). */
+    afterSeq?: number;
+    /** Bu sıradan önceki mesajlar (geçmiş). */
+    beforeSeq?: number;
+    /** 1-100 (varsayılan 50). */
+    limit?: number;
+}
+/** Ek kaynağı: base64 içerik veya dosya adresi (Android `content://`/`file://`, iOS `file://`). */
+export type ChatAttachmentSource = {
+    base64: string;
+} | {
+    uri: string;
+};
+export interface ChatAttachmentOptions {
+    fileName: string;
+    /** `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `application/pdf`, `text/plain`. */
+    mimeType: string;
+    text?: string;
+}
+/** Canlı sohbet olayları (tür → olay). */
+export interface ChatEventMap {
+    message: {
+        message: ChatMessage;
+    };
+    typing: {
+        typing: boolean;
+        name: string | null;
+    };
+    /** Temsilci bu sıra numarasına kadar okudu. */
+    read: {
+        seq: number;
+    };
+    unread: {
+        count: number;
+    };
+    conversation: {
+        conversationId: string;
+        status: string;
+        botActive: boolean;
+    };
+    connection: {
+        connected: boolean;
+    };
+    /** Kalıcı hata (ör. `HS_PLAN_FEATURE_REQUIRED`); dinleme durdu. */
+    error: {
+        code: string;
+        message: string | null;
+    };
+    /** Sohbet bildirimine tıklandı: uygulama sohbet ekranını açmalı (soğuk başlatmada ilk dinleyiciye iletilir). */
+    open: {
+        conversationId: string;
+        seq: number;
+    };
+}

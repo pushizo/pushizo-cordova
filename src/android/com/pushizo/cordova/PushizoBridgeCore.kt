@@ -9,6 +9,8 @@ import android.os.Build
 import com.pushizo.sdk.Pushizo
 import com.pushizo.sdk.HsApiException
 import com.pushizo.sdk.HsCallback
+import com.pushizo.sdk.HsChatEventAdapter
+import com.pushizo.sdk.HsChatOpenListener
 import com.pushizo.sdk.HsClickEvent
 import com.pushizo.sdk.HsForegroundEvent
 import com.pushizo.sdk.HsInAppClickEvent
@@ -80,6 +82,12 @@ internal class PushizoBridgeCore(
         emit("inAppClick", JSONObject().put("message", JSONObject().put("id", e.messageId)).put("result", JSONObject().put("actionId", e.actionId).put("url", e.url.orNull())))
     }
 
+    /** Canlı sohbet olayları → JS `chatEvent` (`{ type: message|typing|read|unread|conversation|connection|error, ... }`). */
+    private val chatListener = HsChatEventAdapter { type, payload -> emit("chatEvent", JSONObject(payload).put("type", type)) }
+
+    /** Sohbet bildirimine tıklama → JS `chatOpen` (cephe dinleyici yoksa bekletir). */
+    private val chatOpenListener = HsChatOpenListener { info -> emit("chatOpen", JSONObject(info.toMap())) }
+
     private val inAppLifecycleListener = object : HsInAppLifecycleListener {
         private fun send(event: String, e: HsInAppLifecycleEvent) =
             emit("inAppLifecycle", JSONObject().put("event", event).put("message", JSONObject().put("id", e.message.id)))
@@ -103,6 +111,8 @@ internal class PushizoBridgeCore(
         Pushizo.Notifications.addPermissionObserver(permissionObserver)
         Pushizo.InAppMessages.addClickListener(inAppClickListener)
         Pushizo.InAppMessages.addLifecycleListener(inAppLifecycleListener)
+        Pushizo.Chat.addListener(chatListener)
+        Pushizo.Chat.addOpenListener(chatOpenListener)
     }
 
     fun detach() {
@@ -113,6 +123,8 @@ internal class PushizoBridgeCore(
         Pushizo.Notifications.removePermissionObserver(permissionObserver)
         Pushizo.InAppMessages.removeClickListener(inAppClickListener)
         Pushizo.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
+        Pushizo.Chat.removeListener(chatListener)
+        Pushizo.Chat.removeOpenListener(chatOpenListener)
         // Bekleyen ön plan bildirimleri kaybolmasın diye gösterilir.
         val pending = synchronized(pendingForeground) { pendingForeground.values.toList().also { pendingForeground.clear() } }
         pending.forEach { it.display() }
@@ -303,6 +315,39 @@ internal class PushizoBridgeCore(
                 // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
                 "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
                 "startDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
+                // Canlı sohbet (ADR-0040): kimlik, kuyruk, akış ve push native SDK'dadır.
+                "chatStart" -> Pushizo.Chat.start(args.optStringOrNull("name"), args.optStringOrNull("email"), args.optStringOrNull("language"), callback(reply) { JSONObject(it.toMap()) })
+                "chatGetConfig" -> Pushizo.Chat.getConfig(args.optStringOrNull("language"), callback(reply) { JSONObject(it.toMap()) })
+                "chatGetConversation" -> Pushizo.Chat.getConversation(callback(reply) { JSONObject(it.toMap()) })
+                "chatGetMessages" -> Pushizo.Chat.getMessages(
+                    args.optLongOrNull("afterSeq"), args.optLongOrNull("beforeSeq"), args.optInt("limit", 50), callback(reply) { JSONObject(it.toMap()) },
+                )
+                "chatSendMessage" -> Pushizo.Chat.sendMessage(args.requireString("text"), args.optStringOrNull("optionId"), callback(reply) { it.toJson() })
+                "chatSendAttachment" -> {
+                    val fileName = args.requireString("fileName")
+                    val mimeType = args.requireString("mimeType")
+                    val text = args.optStringOrNull("text")
+                    val base64 = args.optStringOrNull("base64")
+                    if (base64 != null) {
+                        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                        Pushizo.Chat.sendAttachment(bytes, fileName, mimeType, text, callback(reply) { it.toJson() })
+                    } else {
+                        Pushizo.Chat.sendAttachment(android.net.Uri.parse(args.requireString("uri")), fileName, mimeType, text, callback(reply) { it.toJson() })
+                    }
+                }
+                "chatMarkRead" -> Pushizo.Chat.markRead(args.optLong("seq", 0L), callback(reply) { JSONObject().put("unreadCount", it) })
+                "chatRefreshUnreadCount" -> Pushizo.Chat.refreshUnreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
+                "chatGetUnreadCount" -> reply.success(JSONObject().put("unreadCount", Pushizo.Chat.unreadCount))
+                "chatLeaveOfflineMessage" -> Pushizo.Chat.leaveOfflineMessage(
+                    args.requireString("email"), args.requireString("text"), args.optStringOrNull("name"), callback(reply) { it.toJson() },
+                )
+                "chatSetTyping" -> { Pushizo.Chat.setTyping(args.optBoolean("typing", false)); reply.success(null) }
+                "chatStartListening" -> { Pushizo.Chat.startListening(); reply.success(null) }
+                "chatStopListening" -> { Pushizo.Chat.stopListening(); reply.success(null) }
+                "chatAttachmentUrl" -> reply.success(
+                    JSONObject().put("url", Pushizo.Chat.attachmentUrl(args.requireString("attachmentId"), args.optBoolean("download", false))),
+                )
+                "chatGetVisitorId" -> reply.success(JSONObject().put("visitorId", Pushizo.Chat.visitorId.orNull()))
                 else -> return false
             }
         } catch (e: IllegalArgumentException) {
@@ -413,6 +458,8 @@ internal class PushizoBridgeCore(
         private fun Any?.orNull(): Any = this ?: JSONObject.NULL
 
         fun JSONObject.optStringOrNull(key: String): String? = if (has(key) && !isNull(key)) optString(key) else null
+
+        fun JSONObject.optLongOrNull(key: String): Long? = if (has(key) && !isNull(key)) optLong(key) else null
 
         fun JSONObject.requireString(key: String): String =
             optStringOrNull(key)?.takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("$key gerekli")
