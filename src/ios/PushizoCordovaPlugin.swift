@@ -138,5 +138,20 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setLocationShared:) func setLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(isLocationShared:) func isLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatStart:) func chatStart(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatGetConfig:) func chatGetConfig(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatGetConversation:) func chatGetConversation(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatGetMessages:) func chatGetMessages(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatSendMessage:) func chatSendMessage(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatSendAttachment:) func chatSendAttachment(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatMarkRead:) func chatMarkRead(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatRefreshUnreadCount:) func chatRefreshUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatGetUnreadCount:) func chatGetUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatLeaveOfflineMessage:) func chatLeaveOfflineMessage(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatSetTyping:) func chatSetTyping(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatStartListening:) func chatStartListening(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatStopListening:) func chatStopListening(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatAttachmentUrl:) func chatAttachmentUrl(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatGetVisitorId:) func chatGetVisitorId(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(requestLocationPermission:) func requestLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

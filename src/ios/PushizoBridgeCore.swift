@@ -103,6 +103,15 @@ final class PushizoBridgeCore: NSObject {
             Self.active?.emit("inAppClick", ["message": ["id": e.messageId], "result": ["actionId": e.actionId, "url": Self.orNull(e.url)]])
         }
         Pushizo.InAppMessages.addLifecycleListener(PushizoBridgeLifecycleForwarder.shared)
+        // Canlı sohbet olayları → JS `chatEvent`; sohbet bildirimi tıklaması → `chatOpen` (cephe bekletir).
+        Pushizo.Chat.addListener { event in
+            var body = event.payload
+            body["type"] = event.type
+            Self.active?.emit("chatEvent", body)
+        }
+        Pushizo.Chat.addOpenListener { info in
+            Self.active?.emit("chatOpen", info.dictionary)
+        }
     }
 
     private func onForeground(_ event: HSForegroundEvent) {
@@ -292,6 +301,56 @@ final class PushizoBridgeCore: NSObject {
             // Açıklama uyarısı + `requestWhenInUseAuthorization`; sonuç ana iş parçacığında döner.
             Pushizo.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }
 
+        // Canlı sohbet (ADR-0040): kimlik, kuyruk, akış ve push yerel SDK'dadır.
+        case "chatStart":
+            let name = string("name"), email = string("email"), language = string("language")
+            inbox(reply) { try await Pushizo.Chat.start(name: name, email: email, language: language).dictionary }
+        case "chatGetConfig":
+            let language = string("language")
+            inbox(reply) { try await Pushizo.Chat.getConfig(language: language).dictionary }
+        case "chatGetConversation":
+            inbox(reply) { try await Pushizo.Chat.getConversation().dictionary }
+        case "chatGetMessages":
+            let after = (args["afterSeq"] as? NSNumber)?.intValue
+            let before = (args["beforeSeq"] as? NSNumber)?.intValue
+            let limit = (args["limit"] as? NSNumber)?.intValue ?? 50
+            inbox(reply) { try await Pushizo.Chat.getMessages(afterSeq: after, beforeSeq: before, limit: limit).dictionary }
+        case "chatSendMessage":
+            guard let text = string("text") else { invalid("text gerekli"); return true }
+            let optionId = string("optionId")
+            inbox(reply) { try await Pushizo.Chat.sendMessage(text, optionId: optionId).dictionary }
+        case "chatSendAttachment":
+            guard let fileName = string("fileName"), let mimeType = string("mimeType") else { invalid("fileName ve mimeType gerekli"); return true }
+            let text = string("text")
+            let data: Data
+            if let base64 = string("base64") {
+                guard let decoded = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { invalid("base64 içerik çözülemedi"); return true }
+                data = decoded
+            } else if let uri = string("uri"), let url = URL(string: uri), url.isFileURL, let contents = try? Data(contentsOf: url) {
+                data = contents
+            } else {
+                invalid("base64 veya okunabilir bir file:// uri gerekli"); return true
+            }
+            inbox(reply) { try await Pushizo.Chat.sendAttachment(data, fileName: fileName, mimeType: mimeType, text: text).dictionary }
+        case "chatMarkRead":
+            let seq = (args["seq"] as? NSNumber)?.intValue ?? 0
+            inbox(reply) { ["unreadCount": try await Pushizo.Chat.markRead(seq)] }
+        case "chatRefreshUnreadCount":
+            inbox(reply) { ["unreadCount": try await Pushizo.Chat.refreshUnreadCount()] }
+        case "chatGetUnreadCount": ok(["unreadCount": Pushizo.Chat.unreadCount])
+        case "chatLeaveOfflineMessage":
+            guard let email = string("email"), let text = string("text") else { invalid("email ve text gerekli"); return true }
+            let name = string("name")
+            inbox(reply) { try await Pushizo.Chat.leaveOfflineMessage(email: email, text: text, name: name).dictionary }
+        case "chatSetTyping": Pushizo.Chat.setTyping(args["typing"] as? Bool ?? false); ok()
+        case "chatStartListening": Pushizo.Chat.startListening(); ok()
+        case "chatStopListening": Pushizo.Chat.stopListening(); ok()
+        case "chatAttachmentUrl":
+            guard let attachmentId = string("attachmentId") else { invalid("attachmentId gerekli"); return true }
+            let download = args["download"] as? Bool ?? false
+            inbox(reply) { ["url": try Pushizo.Chat.attachmentUrl(attachmentId, download: download).absoluteString] }
+        case "chatGetVisitorId": ok(["visitorId": Self.orNull(Pushizo.Chat.visitorId)])
+
         // Live Activities (ADR-0024): genel `PushizoDefaultLiveActivityAttributes` türü; değer doğrulaması yerel SDK'dadır.
         case "setupDefaultLiveActivity":
             liveActivity(reply) { try Pushizo.LiveActivities.setupDefaultLiveActivity() }
@@ -317,6 +376,8 @@ final class PushizoBridgeCore: NSObject {
                 DispatchQueue.main.async { reply(.success(value)) }
             } catch let error as HSApiError {
                 DispatchQueue.main.async { reply(.failure(code: error.code, message: error.message)) }
+            } catch HSChatError.invalidArgument(let message) {
+                DispatchQueue.main.async { reply(.failure(code: "INVALID_ARGUMENT", message: message)) }
             } catch let error as HSError {
                 let code: String
                 switch error {

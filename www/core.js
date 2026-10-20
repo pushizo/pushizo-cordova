@@ -34,6 +34,20 @@ function stringRecord(input, name) {
     }
     return out;
 }
+const CHAT_ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', 'text/plain'];
+/** Sohbet metni: boş olmayan, en çok 4000 karakter (sunucu kuralı). */
+function chatText(value) {
+    const text = requireString(value, 'text');
+    if (text.trim().length > 4000)
+        throw new RangeError('Pushizo: mesaj en fazla 4000 karakter olabilir.');
+    return text;
+}
+function chatSeq(value, name, min) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
+        throw new RangeError(`Pushizo: ${name} en az ${min} olan bir tam sayı olmalı.`);
+    }
+    return value;
+}
 /** Live Activity etkinlik kimliği: iOS SDK ve sunucu `start` kuralı (1-100 karakter; harf, rakam ve `_ . : -`). */
 const LIVE_ACTIVITY_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
 const MAX_LIVE_ACTIVITY_KEY_LENGTH = 64;
@@ -153,6 +167,19 @@ class PushizoCore {
         this.inAppLifecycleListeners = new Set();
         /** Dinleyici yokken gelen tıklamalar (soğuk başlatma); ilk dinleyiciye teslim edilir. */
         this.pendingClicks = [];
+        /** Canlı sohbet dinleyicileri (tür başına). */
+        this.chatListeners = {
+            message: new Set(),
+            typing: new Set(),
+            read: new Set(),
+            unread: new Set(),
+            conversation: new Set(),
+            connection: new Set(),
+            error: new Set(),
+            open: new Set(),
+        };
+        /** Dinleyici yokken gelen sohbet bildirimi tıklamaları (soğuk başlatma). */
+        this.pendingChatOpens = [];
         this.foregroundFlag = false;
         // --- Kullanıcı ---
         this.User = {
@@ -302,6 +329,114 @@ class PushizoCore {
             archive: (id) => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
             unreadCount: async () => { var _a; return (_a = (await this.bridge.call('inboxUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
         };
+        // --- Canlı sohbet (ADR-0040) ---
+        /**
+         * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
+         * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.
+         */
+        this.Chat = {
+            /** Sohbeti etkinleştirir ve ziyaretçiyi bağlar (giriş yapmış kullanıcı, push aboneliği); konuşma varsa döner. */
+            start: (options = {}) => {
+                const args = {};
+                if (options.name)
+                    args.name = options.name;
+                if (options.email)
+                    args.email = options.email;
+                if (options.language)
+                    args.language = options.language;
+                return this.bridge.call('chatStart', args);
+            },
+            /** Widget ayarları, çevrimiçi durumu, çevrimdışı metni ve ek sınırları. */
+            getConfig: (language) => this.bridge.call('chatGetConfig', language ? { language } : {}),
+            /** Konuşma (yoksa null) ve okunmamış sayısı. */
+            getConversation: () => this.bridge.call('chatGetConversation'),
+            /** Mesajlar (kronolojik): parametresiz en yeni `limit`; `afterSeq` sonrakiler, `beforeSeq` daha eski geçmiş. */
+            getMessages: (options = {}) => {
+                var _a;
+                const limit = (_a = options.limit) !== null && _a !== void 0 ? _a : 50;
+                if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+                    return Promise.reject(new RangeError('Pushizo: limit 1-100 olmalı.'));
+                }
+                const args = { limit };
+                try {
+                    if (options.afterSeq !== undefined)
+                        args.afterSeq = chatSeq(options.afterSeq, 'afterSeq', 0);
+                    if (options.beforeSeq !== undefined)
+                        args.beforeSeq = chatSeq(options.beforeSeq, 'beforeSeq', 1);
+                }
+                catch (err) {
+                    return Promise.reject(err);
+                }
+                return this.bridge.call('chatGetMessages', args);
+            },
+            /**
+             * Mesaj gönderir (ilk mesaj konuşmayı açar); `optionId` bot sorusunda seçilen hızlı yanıttır. Ağ yoksa mesaj native
+             * kuyruğa alınır ve `pending` mesaj döner; gönderilince `message` olayıyla sunucu kopyası gelir.
+             */
+            sendMessage: (text, options = {}) => {
+                const args = { text: chatText(text) };
+                if (options.optionId)
+                    args.optionId = options.optionId;
+                return this.bridge.call('chatSendMessage', args);
+            },
+            /** Ek gönderir (PNG/JPEG/WebP/GIF/PDF/düz metin, en çok 10 MB). */
+            sendAttachment: (source, options) => {
+                const mime = requireString(options.mimeType, 'mimeType').split(';')[0].trim().toLowerCase();
+                if (!CHAT_ATTACHMENT_TYPES.includes(mime)) {
+                    return Promise.reject(new TypeError(`Pushizo: desteklenmeyen dosya türü '${mime}'.`));
+                }
+                const args = { fileName: requireString(options.fileName, 'fileName'), mimeType: mime };
+                if ('base64' in source)
+                    args.base64 = requireString(source.base64, 'base64');
+                else
+                    args.uri = requireString(source.uri, 'uri');
+                if (options.text && options.text.trim())
+                    args.text = options.text;
+                return this.bridge.call('chatSendAttachment', args);
+            },
+            /** `seq` numarasına kadar okundu işaretler; kalan okunmamış sayısını döndürür. */
+            markRead: async (seq) => { var _a; return (_a = (await this.bridge.call('chatMarkRead', { seq: chatSeq(seq, 'seq', 0) })).unreadCount) !== null && _a !== void 0 ? _a : 0; },
+            /** Okunmamış sayısını sunucudan yeniler. */
+            refreshUnreadCount: async () => { var _a; return (_a = (await this.bridge.call('chatRefreshUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
+            /** Son bilinen okunmamış sayısı (ağ çağrısı yok). */
+            getUnreadCount: async () => { var _a; return (_a = (await this.bridge.call('chatGetUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
+            /** Çevrimdışı / çalışma saatleri dışında e-postayla mesaj bırakır. */
+            leaveOfflineMessage: (email, text, name) => {
+                const args = { email: requireString(email, 'email'), text: chatText(text) };
+                if (name)
+                    args.name = name;
+                return this.bridge.call('chatLeaveOfflineMessage', args);
+            },
+            /** Yazıyor göstergesi (native SDK tekrarları seyreltir). */
+            setTyping: (typing) => this.bridge.call('chatSetTyping', { typing: Boolean(typing) }),
+            /** Canlı dinlemeyi başlatır; koparsa native SDK geri çekilmeyle yeniden bağlanır ve eksikleri yoklar. */
+            startListening: async () => {
+                await this.ensureSubscribed();
+                return this.bridge.call('chatStartListening');
+            },
+            /** Canlı dinlemeyi durdurur (arka plana geçişte önerilir; temsilci mesajı push ile gelir). */
+            stopListening: () => this.bridge.call('chatStopListening'),
+            /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
+            attachmentUrl: async (attachmentId, download = false) => (await this.bridge.call('chatAttachmentUrl', { attachmentId: requireString(attachmentId, 'attachmentId'), download })).url,
+            /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
+            getVisitorId: async () => { var _a; return (_a = (await this.bridge.call('chatGetVisitorId')).visitorId) !== null && _a !== void 0 ? _a : null; },
+            /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
+            addEventListener: (event, listener) => {
+                const set = this.chatListeners[event];
+                if (!set)
+                    throw new TypeError(`Pushizo: bilinmeyen sohbet olayı '${String(event)}'.`);
+                const remove = this.listen(set, listener);
+                if (event === 'open') {
+                    const pending = this.pendingChatOpens.splice(0);
+                    pending.forEach((e) => safeInvoke(listener, e));
+                }
+                return remove;
+            },
+            removeEventListener: (event, listener) => {
+                var _a;
+                (_a = this.chatListeners[event]) === null || _a === void 0 ? void 0 : _a.delete(listener);
+            },
+        };
         // --- Konum (v2 Faz 17b) ---
         /**
          * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
@@ -422,6 +557,12 @@ class PushizoCore {
                 });
                 break;
             }
+            case 'chatEvent':
+                this.onChatEvent((payload !== null && payload !== void 0 ? payload : {}));
+                break;
+            case 'chatOpen':
+                this.onChatOpen((payload !== null && payload !== void 0 ? payload : {}));
+                break;
             default:
                 break;
         }
@@ -529,6 +670,51 @@ class PushizoCore {
     /** Kullanıcıyı anonim kullanıcıya döndürür; kimlik JWT'si cihazdan silinir. */
     logout() {
         return this.bridge.call('logout');
+    }
+    /** Native sohbet olayını türüne göre dağıtır. */
+    onChatEvent(raw) {
+        var _a, _b, _c;
+        const str = (v) => (typeof v === 'string' ? v : null);
+        const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+        const emit = (type, event) => {
+            this.chatListeners[type].forEach((l) => safeInvoke(l, event));
+        };
+        switch (raw.type) {
+            case 'message':
+                emit('message', { message: raw.message });
+                break;
+            case 'typing':
+                emit('typing', { typing: raw.typing === true, name: str(raw.name) });
+                break;
+            case 'read':
+                emit('read', { seq: num(raw.seq) });
+                break;
+            case 'unread':
+                emit('unread', { count: num(raw.count) });
+                break;
+            case 'conversation':
+                emit('conversation', { conversationId: (_a = str(raw.conversationId)) !== null && _a !== void 0 ? _a : '', status: (_b = str(raw.status)) !== null && _b !== void 0 ? _b : 'open', botActive: raw.botActive === true });
+                break;
+            case 'connection':
+                emit('connection', { connected: raw.connected === true });
+                break;
+            case 'error':
+                emit('error', { code: (_c = str(raw.code)) !== null && _c !== void 0 ? _c : 'HS_ERROR', message: str(raw.message) });
+                break;
+            default:
+                break;
+        }
+    }
+    onChatOpen(raw) {
+        const event = {
+            conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : '',
+            seq: typeof raw.seq === 'number' ? raw.seq : 0,
+        };
+        if (this.chatListeners.open.size === 0) {
+            this.pendingChatOpens.push(event);
+            return;
+        }
+        this.chatListeners.open.forEach((l) => safeInvoke(l, event));
     }
 }
 exports.PushizoCore = PushizoCore;
