@@ -640,7 +640,7 @@ export class PushizoCore {
         if (options.afterSeq !== undefined) args.afterSeq = chatSeq(options.afterSeq, 'afterSeq', 0);
         if (options.beforeSeq !== undefined) args.beforeSeq = chatSeq(options.beforeSeq, 'beforeSeq', 1);
       } catch (err) {
-        return Promise.reject(err);
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
       }
       return this.bridge.call<ChatMessagePage>('chatGetMessages', args);
     },
