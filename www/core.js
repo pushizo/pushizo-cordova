@@ -365,7 +365,7 @@ class PushizoCore {
                         args.beforeSeq = chatSeq(options.beforeSeq, 'beforeSeq', 1);
                 }
                 catch (err) {
-                    return Promise.reject(err);
+                    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
                 }
                 return this.bridge.call('chatGetMessages', args);
             },
