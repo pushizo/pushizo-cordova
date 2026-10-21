@@ -7,8 +7,7 @@
   "homepage": "https://docs.pushizo.com/docs/sdk/cordova",
   "repository": {
     "type": "git",
-    "url": "https://github.com/exec0de/pushizo.git",
-    "directory": "sdk/cordova"
+    "url": "git+https://github.com/pushizo/pushizo-cordova.git"
   },
   "keywords": [
     "cordova",

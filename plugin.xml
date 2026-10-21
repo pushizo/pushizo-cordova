@@ -8,7 +8,7 @@
     <description>Push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Pushizo)</description>
     <license>MIT</license>
     <keywords>push,notifications,fcm,apns,in-app,inbox,pushizo</keywords>
-    <repo>https://github.com/exec0de/pushizo.git</repo>
+    <repo>https://github.com/pushizo/pushizo-cordova.git</repo>
 
     <engines>
         <engine name="cordova" version=">=12.0.0" />
