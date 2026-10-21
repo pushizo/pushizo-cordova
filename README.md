@@ -13,8 +13,16 @@
 
 **Pushizo Cordova plugin** — Cordova plugin that wraps the native Pushizo Android and iOS SDKs through cordova.exec.
 
-> **Status:** Publishing to npm is in progress; until then you can build from this repository.<br>
-> **Durum:** npm yayını hazırlanıyor; o zamana kadar bu depodan derleyerek kullanabilirsiniz.
+> **Status:** Publishing to npm is in progress.<br>
+> **Durum:** npm yayını hazırlanıyor.
+
+**Install from GitHub until then · O zamana kadar GitHub'dan kurulum:**
+
+```bash
+cordova plugin add https://github.com/pushizo/pushizo-cordova.git#v0.1.0
+```
+
+**After publication · Yayından sonra:**
 
 ```bash
 cordova plugin add cordova-plugin-pushizo
