@@ -1,3 +1,31 @@
+<!-- pushizo:header -->
+<p align="center">
+  <a href="https://pushizo.com"><img src="https://raw.githubusercontent.com/pushizo/.github/main/profile/assets/mark.svg" alt="Pushizo" width="56" height="56"></a>
+</p>
+<p align="center">
+  <a href="https://docs.pushizo.com/docs/sdk/cordova"><img src="https://img.shields.io/badge/docs-docs.pushizo.com-5b4bdb" alt="Docs"></a>
+  <a href="https://docs.pushizo.com/docs/api"><img src="https://img.shields.io/badge/API-reference-b44fc4" alt="API reference"></a>
+  <a href="https://github.com/pushizo/pushizo-cordova/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-16130f" alt="License: MIT"></a>
+</p>
+<p align="center"><a href="#english">English</a> · <a href="#türkçe">Türkçe</a></p>
+
+## English
+
+**Pushizo Cordova plugin** — Cordova plugin that wraps the native Pushizo Android and iOS SDKs through cordova.exec.
+
+> **Status:** Publishing to npm is in progress; until then you can build from this repository.<br>
+> **Durum:** npm yayını hazırlanıyor; o zamana kadar bu depodan derleyerek kullanabilirsiniz.
+
+```bash
+cordova plugin add cordova-plugin-pushizo
+```
+
+The detailed guide below is in Turkish; code samples are language-neutral. Full documentation:
+[docs.pushizo.com/docs/sdk/cordova](https://docs.pushizo.com/docs/sdk/cordova) · API reference: [docs.pushizo.com/docs/api](https://docs.pushizo.com/docs/api).
+
+## Türkçe
+<!-- /pushizo:header -->
+
 # cordova-plugin-pushizo
 
 Pushizo'nun Cordova eklentisi. Native Pushizo Android (`com.pushizo:pushizo-android`) ve iOS (`Pushizo` pod) SDK'larını `cordova.exec` köprüsüyle sarar. API yüzeyi plan 06 §6.1, eski sağlayıcı v5 ve `@pushizo/capacitor` ile aynıdır.
@@ -43,7 +71,7 @@ Tüm metotlar Promise döndürür. Hatalar `PushizoError` örneğidir ve `code` 
 ### JWT ile kimlik doğrulama
 
 App ayarlarında kimlik doğrulama kipi (`identity_verification_mode`) `jwt` veya `both` ise kullanıcı, sunucunuzda
-imzalanmış kısa ömürlü bir ES256 JWT ile kimliklendirilir (ADR-0023 §9; talepler: `sub` = external_id, `aud` = app_id, `exp`/`iat` zorunlu, en çok 24 saat, yalnızca ES256).
+imzalanmış kısa ömürlü bir ES256 JWT ile kimliklendirilir (talepler: `sub` = external_id, `aud` = app_id, `exp`/`iat` zorunlu, en çok 24 saat, yalnızca ES256).
 
 ```js
 await Pushizo.login('user_42', { jwt: jwtFromBackend });                  // yalnızca JWT
@@ -62,8 +90,7 @@ await Pushizo.logout();
 
 ### Live Activities (iOS)
 
-Köprü, iOS SDK'nın genel `PushizoDefaultLiveActivityAttributes` türünü kullanır (ADR-0024; ayrıntı
-`docs/sdk/ios.md` "Live Activities"). Sunucu etkinliği uzaktan başlatır (push-to-start, iOS 17.2+), günceller ve bitirir;
+Köprü, iOS SDK'nın genel `PushizoDefaultLiveActivityAttributes` türünü kullanır "Live Activities"). Sunucu etkinliği uzaktan başlatır (push-to-start, iOS 17.2+), günceller ve bitirir;
 yerel başlatma iOS 16.1+ ister.
 
 ```js
@@ -120,11 +147,11 @@ Ziyaretçi kimliği, çevrimdışı kuyruk (aynı `client_message_id` ile yenide
 geri çekilme + `after_seq` yoklaması) ve push ile gelen temsilci mesajları (`pushizo_chat`) yerel Android/iOS SDK'sındadır;
 `start` sonrası login/logout ve push aboneliği değişince bağlama yerel SDK'da yenilenir, logout ziyaretçiyi sıfırlar.
 Mesajlar `seq` ile sıralanır; ağ yokken gönderilen mesaj `pending` döner ve gönderilince olayla sunucu kopyası gelir.
-Ayrıntı: `docs/sdk/android.md` / `docs/sdk/ios.md` → "Canlı sohbet" (ADR-0040).
+Ayrıntı: [android rehberi](https://docs.pushizo.com/docs/sdk/android) / [ios rehberi](https://docs.pushizo.com/docs/sdk/ios) → "Canlı sohbet".
 
 ### Konum
 
-Kullanıcı izin verirse cihazın konumu push aboneliğine yazılır (v2 Faz 17b); segmentlerde konuma göre hedefleme için
+Kullanıcı izin verirse cihazın konumu push aboneliğine yazılır; segmentlerde konuma göre hedefleme için
 kullanılır. Paylaşım **yalnızca ön planda** çalışır (arka plan konumu yok): native SDK konumu oturum başında ve uygulama
 ön plana döndüğünde en sık 5 dakikada bir gönderir. İzin yoksa veya gizlilik onayı (`requiresPrivacyConsent`)
 verilmemişse hiçbir şey gönderilmez; tercih kalıcıdır.
@@ -214,7 +241,7 @@ In-app mesajları yerel Android/iOS SDK'sı çizer; bu paket köprüdür. HTML i
 `close`/`click`/`addTag`/`trackEvent`) ve carousel blokları yerel SDK'dan olduğu gibi devralınır: ek kod veya
 yapılandırma gerekmez, tıklama ve yaşam döngüsü olayları mevcut in-app dinleyicilerine gelir. Yetenek bildirimi
 (`supports=html,carousel`) yerel SDK tarafından yapılır; desteklemeyen eski yerel sürümlere sunucu HTML mesaj göndermez
-ve carousel bloklarını çıkarır (ADR-0027 §6–7).
+ve carousel bloklarını çıkarır.
 
 ## Android kurulumu (FCM)
 
@@ -291,4 +318,25 @@ npm test        # vitest: cephe, cordova.exec köprüsü ve native sözleşme de
 npm run build   # src/*.ts → www/*.js (eklentiyle birlikte yayınlanır, depoda tutulur)
 ```
 
-Örnek uygulama: `examples/cordova`.
+Adım adım kurulum ve örnek kod: [cordova rehberi](https://docs.pushizo.com/docs/sdk/cordova).
+
+<!-- pushizo:footer -->
+---
+
+## Support · Destek
+
+- **Guide · Rehber:** [docs.pushizo.com/docs/sdk/cordova](https://docs.pushizo.com/docs/sdk/cordova)
+- **API reference & OpenAPI · API referansı ve OpenAPI:** [docs.pushizo.com/docs/api](https://docs.pushizo.com/docs/api) ·
+  [pushizo-openapi](https://github.com/pushizo/pushizo-openapi)
+- **Bugs & ideas · Hata ve öneri:** [Issues](https://github.com/pushizo/pushizo-cordova/issues)
+- **Security · Güvenlik:** please do not open public issues; email [security@pushizo.com](mailto:security@pushizo.com) ·
+  herkese açık issue açmayın, bu adrese yazın.
+- **Help · Destek:** [support@pushizo.com](mailto:support@pushizo.com)
+
+This repository is mirrored automatically from the Pushizo main repository on every release. Please open an issue
+instead of a pull request; fixes land in the main repository and ship with the next release.
+Bu depo her sürümde Pushizo ana deposundan otomatik yansıtılır. Pull request yerine issue açın; düzeltmeler ana depoda
+yapılır ve bir sonraki sürümle buraya gelir.
+
+Released under the MIT License · MIT lisanslıdır — [LICENSE](https://github.com/pushizo/pushizo-cordova/blob/main/LICENSE).
+<!-- /pushizo:footer -->
