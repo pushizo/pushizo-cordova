@@ -61,7 +61,7 @@ describe('PushizoCore.Chat', () => {
     expect(await hs.Chat.markRead(12)).toBe(0);
     expect(await hs.Chat.refreshUnreadCount()).toBe(3);
     expect(await hs.Chat.getUnreadCount()).toBe(3);
-    await hs.Chat.leaveOfflineMessage('ali@example.com', 'Arayın');
+    await hs.Chat.leaveOfflineMessage('ali@pushizo.com', 'Arayın');
     await hs.Chat.setTyping(true);
     await hs.Chat.startListening();
     await hs.Chat.stopListening();
@@ -78,7 +78,7 @@ describe('PushizoCore.Chat', () => {
       ['chatMarkRead', { seq: 12 }],
       ['chatRefreshUnreadCount', undefined],
       ['chatGetUnreadCount', undefined],
-      ['chatLeaveOfflineMessage', { email: 'ali@example.com', text: 'Arayın' }],
+      ['chatLeaveOfflineMessage', { email: 'ali@pushizo.com', text: 'Arayın' }],
       ['chatSetTyping', { typing: true }],
       ['chatStartListening', undefined],
       ['chatStopListening', undefined],

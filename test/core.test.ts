@@ -32,7 +32,7 @@ function fakeBridge(responses: Record<string, unknown> = {}) {
 const notification = {
   title: 'Merhaba',
   body: 'Gövde',
-  url: 'https://example.com',
+  url: 'https://pushizo.com',
   imageUrl: null,
   deliveryId: 'dlv_1',
   messageId: 'msg_1',
@@ -196,9 +196,9 @@ describe('PushizoCore', () => {
   });
 
   it('e-posta ve SMS listeleri getContacts yanıtından okunur', async () => {
-    const f = fakeBridge({ getContacts: { emails: ['a@example.com', 7], smsNumbers: ['+905321234567'] } });
+    const f = fakeBridge({ getContacts: { emails: ['a@pushizo.com', 7], smsNumbers: ['+905321234567'] } });
     const hs = new PushizoCore(f.bridge);
-    expect(await hs.User.getEmails()).toEqual(['a@example.com']);
+    expect(await hs.User.getEmails()).toEqual(['a@pushizo.com']);
     expect(await hs.User.getSmsNumbers()).toEqual(['+905321234567']);
     expect(f.calls.map((c) => c.method)).toEqual(['getContacts', 'getContacts']);
 
@@ -210,7 +210,7 @@ describe('PushizoCore', () => {
   it('e-posta, SMS, alias, dil ve olay çağrıları doğru argümanlarla gider', async () => {
     const f = fakeBridge();
     const hs = new PushizoCore(f.bridge);
-    await hs.User.addEmail('ali@example.com');
+    await hs.User.addEmail('ali@pushizo.com');
     await hs.User.addSms('+905551112233');
     await hs.User.addAlias('crm_id', '99');
     await hs.User.removeAlias('crm_id');
@@ -218,7 +218,7 @@ describe('PushizoCore', () => {
     await hs.Session.sendEvent('purchase', { sku: 'A1' }, 49.9);
     await hs.Debug.setLogLevel('none');
     expect(f.calls.map((c) => [c.method, c.args])).toEqual([
-      ['addEmail', { email: 'ali@example.com' }],
+      ['addEmail', { email: 'ali@pushizo.com' }],
       ['addSms', { phoneNumber: '+905551112233' }],
       ['addAliases', { aliases: { crm_id: '99' } }],
       ['removeAlias', { label: 'crm_id' }],

@@ -13,17 +13,6 @@
 
 **Pushizo Cordova plugin** — Cordova plugin that wraps the native Pushizo Android and iOS SDKs through cordova.exec.
 
-> **Status:** Publishing to npm is in progress.<br>
-> **Durum:** npm yayını hazırlanıyor.
-
-**Install from GitHub until then · O zamana kadar GitHub'dan kurulum:**
-
-```bash
-cordova plugin add https://github.com/pushizo/pushizo-cordova.git#v0.1.0
-```
-
-**After publication · Yayından sonra:**
-
 ```bash
 cordova plugin add cordova-plugin-pushizo
 ```
@@ -69,7 +58,7 @@ document.addEventListener('deviceready', async () => {
   await Pushizo.Notifications.requestPermission();
   await Pushizo.login('user_42');                    // identity verification açıksa: login('user_42', identityHash)
   await Pushizo.User.addTags({ plan: 'pro', level: 3 });
-  await Pushizo.User.addEmail('ali@example.com');
+  await Pushizo.User.addEmail('ali@pushizo.com');
   await Pushizo.Session.sendEvent('purchase', { sku: 'A1' }, 49.9);
 });
 ```
@@ -305,7 +294,7 @@ import Pushizo
 
 class NotificationService: UNNotificationServiceExtension {
     let hs = PushizoNotificationServiceExtension(appId: "app_xxx", apiUrl: "https://api.pushizo.com",
-                                                    appGroup: "group.com.example.app.pushizo")
+                                                    appGroup: "group.com.pushizo.app.pushizo")
 
     override func didReceive(_ request: UNNotificationRequest, withContentHandler handler: @escaping (UNNotificationContent) -> Void) {
         hs.didReceive(request, withContentHandler: handler)

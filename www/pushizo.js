@@ -10,7 +10,7 @@ const core_1 = require("./core");
  *
  * ```js
  * document.addEventListener('deviceready', async () => {
- *   await Pushizo.initialize('app_…', { apiUrl: 'https://api.example.com' });
+ *   await Pushizo.initialize('app_…', { apiUrl: 'https://api.pushizo.com' });
  *   await Pushizo.Notifications.requestPermission();
  *   Pushizo.Notifications.addClickListener((e) => console.log(e.result.url));
  * });
