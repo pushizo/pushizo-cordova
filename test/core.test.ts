@@ -445,4 +445,87 @@ describe('PushizoCore', () => {
       ['getInAppPaused', undefined],
     ]);
   });
+
+  it('özellik bayrakları: anahtar doğrulanır, varsayılanlar uygulanır, JSON değeri açılır', async () => {
+    const f = fakeBridge({
+      featureFlagsRefresh: { success: true },
+      featureFlagsIsEnabled: { enabled: true },
+      featureFlagsGetValue: { value: { renk: 'mavi', adet: 2 } },
+    });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.FeatureFlags.refresh()).toBe(true);
+    expect(await hs.FeatureFlags.isEnabled('yeni_sepet')).toBe(true);
+    expect(await hs.FeatureFlags.isEnabled('yeni_sepet', true)).toBe(true);
+    expect(await hs.FeatureFlags.getValue('tema')).toEqual({ renk: 'mavi', adet: 2 });
+    expect(await hs.FeatureFlags.getValue('tema', 'acik')).toEqual({ renk: 'mavi', adet: 2 });
+    expect(f.calls.map((c) => [c.method, c.args])).toEqual([
+      ['featureFlagsRefresh', undefined],
+      ['featureFlagsIsEnabled', { key: 'yeni_sepet', defaultValue: false }],
+      ['featureFlagsIsEnabled', { key: 'yeni_sepet', defaultValue: true }],
+      ['featureFlagsGetValue', { key: 'tema' }],
+      ['featureFlagsGetValue', { key: 'tema' }],
+    ]);
+
+    // Değer yoksa (null / eksik yanıt) varsayılan; yenileme başarısızsa veya yanıt boşsa false.
+    const empty = new PushizoCore(fakeBridge({ featureFlagsGetValue: { value: null } }).bridge);
+    expect(await empty.FeatureFlags.getValue('sepet_limiti', 10)).toBe(10);
+    expect(await empty.FeatureFlags.getValue('sepet_limiti')).toBeNull();
+    expect(await empty.FeatureFlags.isEnabled('x')).toBe(false);
+    expect(await empty.FeatureFlags.refresh()).toBe(false);
+    const missing = new PushizoCore(fakeBridge().bridge);
+    expect(await missing.FeatureFlags.getValue('sepet_limiti', 10)).toBe(10);
+
+    const calls = f.calls.length;
+    await expect(hs.FeatureFlags.isEnabled('')).rejects.toThrow(TypeError);
+    await expect(hs.FeatureFlags.getValue(' ')).rejects.toThrow(/key/);
+    expect(f.calls.length).toBe(calls);
+  });
+
+  it('yerleşimler: anahtar ve limit doğrulanır, mesaj listesi açılır, raporlar yalnızca kimliği taşır', async () => {
+    const message = { id: 'iam_1', priority: 5, display: { blocks: [] } };
+    const f = fakeBridge({ placementsList: { messages: [message] } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Placements.list('home_banner')).toEqual([message]);
+    expect(await hs.Placements.list('a.b-c_1', { limit: 10 })).toEqual([message]);
+    await hs.Placements.reportImpression(message as never);
+    await hs.Placements.reportClick({ id: 'iam_1' }, 'btn_1');
+    await hs.Placements.reportDismiss({ id: 'iam_1' });
+    expect(f.calls.map((c) => [c.method, c.args])).toEqual([
+      ['placementsList', { key: 'home_banner', limit: 1 }],
+      ['placementsList', { key: 'a.b-c_1', limit: 10 }],
+      ['placementsReportImpression', { id: 'iam_1' }],
+      ['placementsReportClick', { id: 'iam_1', buttonId: 'btn_1' }],
+      ['placementsReportDismiss', { id: 'iam_1' }],
+    ]);
+
+    // Boş veya eksik yanıt boş liste.
+    expect(await new PushizoCore(fakeBridge().bridge).Placements.list('home_banner')).toEqual([]);
+
+    const calls = f.calls.length;
+    await expect(hs.Placements.list('Home')).rejects.toThrow(/yerleşim anahtarı/);
+    await expect(hs.Placements.list('1abc')).rejects.toThrow(TypeError);
+    await expect(hs.Placements.list('a'.repeat(65))).rejects.toThrow(TypeError);
+    await expect(hs.Placements.list('')).rejects.toThrow(TypeError);
+    await expect(hs.Placements.list('home', { limit: 0 })).rejects.toThrow(RangeError);
+    await expect(hs.Placements.list('home', { limit: 11 })).rejects.toThrow(/1-10/);
+    await expect(hs.Placements.list('home', { limit: 1.5 })).rejects.toThrow(RangeError);
+    await expect(hs.Placements.reportImpression({ id: '' })).rejects.toThrow(/message\.id/);
+    await expect(hs.Placements.reportImpression(null as never)).rejects.toThrow(TypeError);
+    await expect(hs.Placements.reportClick({ id: 'iam_1' }, '')).rejects.toThrow(/buttonId/);
+    expect(f.calls.length).toBe(calls);
+  });
+
+  it('Location: bölge izleme ayarı köprüye gider, durum eksik yanıtta false', async () => {
+    const f = fakeBridge({ isGeofencingEnabled: { enabled: true } });
+    const hs = new PushizoCore(f.bridge);
+    await hs.Location.setGeofencingEnabled(true);
+    await hs.Location.setGeofencingEnabled(0 as never);
+    expect(await hs.Location.isGeofencingEnabled()).toBe(true);
+    expect(await new PushizoCore(fakeBridge().bridge).Location.isGeofencingEnabled()).toBe(false);
+    expect(f.calls.map((c) => [c.method, c.args])).toEqual([
+      ['setGeofencingEnabled', { enabled: true }],
+      ['setGeofencingEnabled', { enabled: false }],
+      ['isGeofencingEnabled', undefined],
+    ]);
+  });
 });

@@ -32,7 +32,8 @@ Pushizo'nun Cordova eklentisi. Native Pushizo Android (`com.pushizo:pushizo-andr
 - Bildirim tıklaması (soğuk başlatma dahil), ön plan gösterimini engelleme/erteleme
 - Kullanıcı: `login`/`logout` (`identityHash`), tag, alias, dil, e-posta ve SMS aboneliği
 - In-app mesajlar (tetik, ekran, duraklatma, tıklama ve yaşam döngüsü olayları; native çizim)
-- Konum paylaşımı (yalnızca ön plan, açıklama + izin istemi)
+- Konum paylaşımı (yalnızca ön plan, açıklama + izin istemi) ve arka plan bölge izleme
+- Özellik bayrakları (`FeatureFlags`) ve gömülü yerleşimler (`Placements`)
 - Bildirim kutusu, özel olay, KVKK/GDPR gizlilik onayı, günlük seviyesi, bildirim tepsisini temizleme
 
 ## Kurulum
@@ -188,6 +189,66 @@ await Pushizo.Location.setShared(false);                  // paylaşımı kapat�
   string kaynaklarını kullanır; sistem izni `cordova.requestPermissions` ile (`Pushizo.Location.PERMISSION_REQUEST_CODE`)
   istenir ve sonuç SDK'ya iletilir.
 
+### Arka plan bölge izleme
+
+Dashboard'da tanımlı coğrafi bölgelere giriş/çıkışı uygulama kapalıyken de yakalar ([ADR-0065](https://github.com/pushizo/pushizo/blob/main/docs/adr/0065-arka-plan-bolge-izleme.md)).
+İzlemeyi işletim sistemi yapar; sunucuya koordinat gitmez, yalnızca giriş/çıkış olayı bildirilir. Varsayılan **kapalıdır**.
+
+```js
+await Pushizo.Location.setGeofencingEnabled(true);        // kalıcı tercih
+const on = await Pushizo.Location.isGeofencingEnabled();
+```
+
+- Üç koşul birlikte gerekir: `setGeofencingEnabled(true)`, `setShared(true)` ve arka plan konum izni (iOS "Her Zaman",
+  Android `ACCESS_BACKGROUND_LOCATION`). Köprü bu izni **istemez** ve manifest/Info.plist'e **eklemez**; `Info.plist`'e `NSLocationAlwaysAndWhenInUseUsageDescription`, Android manifest'ine `ACCESS_BACKGROUND_LOCATION` eklemek
+  (`config.xml` `<config-file>`/`<edit-config>`) ve izni istemek uygulamanın işidir.
+  Mağaza beyanları ve aydınlatma metni uygulama geliştiricisinin sorumluluğundadır.
+- `initialize` öncesinde `setGeofencingEnabled` `NOT_READY` ile reddedilir. `setShared(false)` veya gizlilik onayının geri
+  alınması kayıtlı bölgeleri kaldırır; tercih korunur.
+- **Android:** uygulamada `com.google.android.gms:play-services-location` bağımlılığı bulunmalıdır; yoksa yerel SDK uyarı
+  loglar ve izleme başlamaz.
+
+### Özellik bayrakları
+
+Bir özelliği yeni sürüm yayımlamadan açıp kapatın, kademeli yayın yapın veya metin/sayı/JSON değerleri uzaktan yönetin
+([rehber](https://docs.pushizo.com/docs/guides/feature-flags)). Değerler yerel SDK'da oturum başında yenilenir ve cihazda
+saklanır; ağ yoksa son değer, hiç alınmadıysa koddaki varsayılan döner. Gizlilik onayı beklenirken istek gönderilmez.
+
+```js
+if (await Pushizo.FeatureFlags.isEnabled('yeni_sepet')) showNewCart();
+const limit = await Pushizo.FeatureFlags.getValue('sepet_limiti', 10);   // metin, sayı, boolean, nesne veya dizi
+const refreshed = await Pushizo.FeatureFlags.refresh();                  // yeni değerler alındıysa true
+```
+
+`isEnabled(key, default = false)` ve `getValue(key, default = null)` yerel önbellekten okur; köprü asenkron olduğundan
+Promise döndürürler. Boş anahtar `TypeError` ile reddedilir.
+
+### Gömülü yerleşimler
+
+Uygulamanın ayırdığı bir alana (ana sayfa afişi, liste arası kart) dashboard'dan içerik gönderin
+([ADR-0068](https://github.com/pushizo/pushizo/blob/main/docs/adr/0068-gomulu-yerlesimler.md)). Köprü yalnızca modeli
+döndürür; çizim uygulamanındır.
+
+```js
+const messages = await Pushizo.Placements.list('home_banner', { limit: 2 });   // InAppMessage[]
+for (const message of messages) {
+  render(message.display.blocks);                                            // title/body/image/button/carousel blokları veya display.html
+  await Pushizo.Placements.reportImpression(message);                        // içerik ekrana gelince
+}
+await Pushizo.Placements.reportClick(message, buttonId);                     // düğme tıklanınca (buttonId: blok/kart düğmesinin id'si)
+await Pushizo.Placements.reportDismiss(message);                             // kullanıcı kapatınca
+```
+
+- Anahtar `^[a-z][a-z0-9_.-]{0,63}$` kalıbına uymalı, `limit` 1-10 olmalıdır; aksi halde çağrı köprüye gitmeden
+  `TypeError`/`RangeError` ile reddedilir. Abonelik yoksa veya gizlilik onayı bekleniyorsa liste boştur.
+- `InAppMessage` alanları yerel modelle aynıdır (`id`, `priority`, `triggers`, `triggerGroups`, `variantId`, `display`,
+  `remainingImpressions`, `minIntervalSeconds`, `stopAfterInteraction`, `lastImpressionAt`, `endAt`, `language`); zamanlar
+  epoch milisaniyedir. Düğme aksiyonları (`url`, `deeplink`, `tags`, `push_prompt`, `outcome`, `dismiss`) uygulama
+  tarafından yürütülür.
+- Rapor çağrıları yerel tarafta son `list` yanıtlarındaki mesajı kimliğiyle bulur (en çok 50 mesaj saklanır); listeden
+  gelmeyen bir mesaj için rapor sessizce yok sayılır (debug log).
+- Ağ/sunucu hatasında Android boş liste döndürür; iOS çağrıyı hata koduyla reddeder.
+
 ### Olaylar
 
 ```js
@@ -249,13 +310,15 @@ ve carousel bloklarını çıkarır.
     <preference name="GradlePluginKotlinEnabled" value="true" />
     <preference name="GradlePluginGoogleServicesEnabled" value="true" />
     <preference name="GradlePluginGoogleServicesVersion" value="4.4.2" />
+    <preference name="android-compileSdkVersion" value="35" />
     <resource-file src="google-services.json" target="app/google-services.json" />
 </platform>
 ```
 
-   Köprü Kotlin ile yazıldığından `GradlePluginKotlinEnabled` zorunludur.
+   Köprü Kotlin ile yazıldığından `GradlePluginKotlinEnabled` zorunludur. Yerel SDK 0.2.1'in `androidx.work` bağımlılığı
+   `compileSdk` 35 ister; cordova-android 13'ün varsayılanı 34 olduğundan `android-compileSdkVersion` tercihi gerekir.
 2. Pushizo dashboard'unda Firebase servis hesabı JSON'unu yükleyin (kurulum sihirbazında **Cordova** seçilebilir); kayıt sonrası otomatik doğrulanır.
-3. Eklenti `com.pushizo:pushizo-android` artefaktına bağlıdır. Maven Central yayınına kadar `sdk/android` içinde `gradle :pushizo:publishToMavenLocal` çalıştırın; eklenti `mavenLocal()` deposunu ekler.
+3. Eklenti `com.pushizo:pushizo-android:0.2.1` artefaktına bağlıdır (özellik bayrakları, yerleşimler ve bölge izleme bu sürümle gelir). Maven Central yayınına kadar `sdk/android` içinde `gradle :pushizo:publishToMavenLocal` çalıştırın; eklenti `mavenLocal()` deposunu ekler.
 4. FCM servisi, `POST_NOTIFICATIONS` izni ve bildirim Activity'si SDK manifestinden birleşir. Bildirim ikonu için `AndroidManifest.xml` içinde `com.pushizo.sdk.default_notification_icon` meta-data'sı verilebilir.
 
 Eklenti, JS ile yapılan `initialize` ayarlarını (yalnızca uygulama kimliği ve herkese açık ayarlar) saklar; süreç bildirim tıklaması veya FCM mesajıyla yeniden başladığında SDK WebView yüklenmeden başlatılır.

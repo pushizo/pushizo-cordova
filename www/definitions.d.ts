@@ -163,6 +163,126 @@ export interface RawInAppLifecycleEvent {
         id: string;
     };
 }
+/** Özellik bayrağı değeri: metin, sayı, mantıksal, nesne veya dizi (JSON). */
+export type FeatureFlagValue = string | number | boolean | null | FeatureFlagValue[] | {
+    [key: string]: FeatureFlagValue;
+};
+/**
+ * In-app mesaj tetik koşulu. `trigger`: `InAppMessages.addTrigger` değeri (`op`: eq | neq | exists | gt | lt).
+ * `unsupported`: bu SDK sürümünün tanımadığı tür (`name` sunucudaki tür adı).
+ */
+export type InAppTrigger = {
+    kind: 'session_start';
+} | {
+    kind: 'event';
+    name: string;
+} | {
+    kind: 'screen';
+    name: string;
+} | {
+    kind: 'trigger';
+    key: string;
+    op: string;
+    value: string | number | null;
+} | {
+    kind: 'session_duration';
+    seconds: number;
+} | {
+    kind: 'unsupported';
+    name: string;
+};
+/** Düğme aksiyonu; `url` http/https adresi, `deeplink` uygulama şemasıdır. */
+export type InAppAction = {
+    type: 'dismiss';
+} | {
+    type: 'url';
+    url: string;
+} | {
+    type: 'deeplink';
+    url: string;
+} | {
+    type: 'tags';
+    tags: Record<string, string>;
+} | {
+    type: 'push_prompt';
+} | {
+    type: 'outcome';
+    name: string;
+    value: number | null;
+};
+export interface InAppButton {
+    id: string;
+    text: string;
+    action: InAppAction;
+    backgroundColor: string | null;
+    textColor: string | null;
+}
+/** Carousel kartı; `button` geçersiz aksiyonluysa null. */
+export interface InAppCarouselCard {
+    id: string;
+    title: string;
+    body: string | null;
+    imageUrl: string | null;
+    imageAlt: string | null;
+    button: InAppButton | null;
+}
+/** Mesaj içerik bloğu; metinler sunucuda kullanıcının dilinde çözülmüştür. */
+export type InAppBlock = {
+    type: 'image';
+    url: string;
+    alt: string | null;
+} | {
+    type: 'title';
+    text: string;
+} | {
+    type: 'body';
+    text: string;
+} | ({
+    type: 'button';
+} & InAppButton) | {
+    type: 'carousel';
+    id: string;
+    cards: InAppCarouselCard[];
+};
+export type InAppLayout = 'modal' | 'banner_top' | 'banner_bottom' | 'fullscreen';
+export interface InAppDisplay {
+    layout: InAppLayout;
+    backgroundColor: string | null;
+    textColor: string | null;
+    dismissible: boolean;
+    autoDismissSeconds: number | null;
+    /** `html` ise `blocks` boştur ve içerik `html` alanındadır. */
+    contentType: 'blocks' | 'html';
+    blocks: InAppBlock[];
+    html: string | null;
+    htmlHeight: number | null;
+}
+/**
+ * In-app mesaj modeli (native `HsInAppMessage` / `HSInAppMessage` alanları); `Placements.list` bu modeli döndürür.
+ * Zamanlar epoch milisaniyedir.
+ */
+export interface InAppMessage {
+    id: string;
+    priority: number;
+    /** İlk tetik grubu (geriye uyum). */
+    triggers: InAppTrigger[];
+    /** Gruplar VEYA, grup içi VE ile bağlıdır. */
+    triggerGroups: InAppTrigger[][];
+    /** Sunucunun seçtiği A/B görünüm varyantı. */
+    variantId: string | null;
+    display: InAppDisplay;
+    remainingImpressions: number;
+    minIntervalSeconds: number;
+    stopAfterInteraction: boolean;
+    lastImpressionAt: number | null;
+    endAt: number | null;
+    /** Sunucunun içeriği çözdüğü dil; web'de null. */
+    language: string | null;
+}
+export interface PlacementListOptions {
+    /** 1-10 (varsayılan 1). */
+    limit?: number;
+}
 export interface ChatAttachment {
     id: string;
     name: string;

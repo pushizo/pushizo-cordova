@@ -16,11 +16,13 @@ import type {
   ChatMessagePage,
   ChatMessagesOptions,
   ChatStartOptions,
+  FeatureFlagValue,
   ForegroundWillDisplayEvent,
   PushizoNotification,
   InAppClickEvent,
   InAppLifecycleEvent,
   InAppLifecycleListener,
+  InAppMessage,
   InAppTriggerValue,
   InboxItem,
   InboxListOptions,
@@ -31,6 +33,7 @@ import type {
   LoginOptions,
   NotificationClickEvent,
   PermissionChangeEvent,
+  PlacementListOptions,
   PreferenceChannel,
   PreferenceInput,
   PushSubscriptionState,
@@ -140,6 +143,15 @@ function liveActivityValues(input: unknown, name: string, reservedKey?: string):
     out[key] = value;
   }
   return out;
+}
+
+/** Yerleşim anahtarı: native SDK ve sunucu kuralı. */
+const PLACEMENT_KEY = /^[a-z][a-z0-9_.-]{0,63}$/;
+
+/** Rapor çağrılarında yalnızca mesaj kimliği köprüye gider; native katman mesajı son `list` yanıtlarından bulur. */
+function placementMessageId(message: Pick<InAppMessage, 'id'>): string {
+  if (message === null || typeof message !== 'object') throw new TypeError('Pushizo: message bir nesne olmalı.');
+  return requireString(message.id, 'message.id');
 }
 
 const PREFERENCE_CHANNELS: readonly PreferenceChannel[] = ['ios_push', 'android_push', 'web_push', 'email', 'sms'];
@@ -757,14 +769,63 @@ export class PushizoCore {
     this.chatListeners.open.forEach((l) => safeInvoke(l, event));
   }
 
+  // --- Özellik bayrakları (ADR-0066) ---
+
+  /**
+   * Özellik bayrakları: değerler native SDK'da oturum başında yenilenir ve cihazda saklanır; ağ yoksa son değer, hiç
+   * alınmadıysa verilen varsayılan döner. Gizlilik onayı beklenirken istek gönderilmez.
+   */
+  readonly FeatureFlags = {
+    /** Değerleri sunucudan hemen yeniler; yeni değerler alındıysa true (hata son değerleri korur). */
+    refresh: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ success: boolean } | undefined>('featureFlagsRefresh'))?.success),
+    /** Bayrak bu kullanıcı için açık mı; değer henüz yoksa `defaultValue`. */
+    isEnabled: async (key: string, defaultValue = false): Promise<boolean> => {
+      const args = { key: requireString(key, 'key'), defaultValue: Boolean(defaultValue) };
+      return Boolean((await this.bridge.call<{ enabled: boolean } | undefined>('featureFlagsIsEnabled', args))?.enabled);
+    },
+    /** Bayrağın değeri (metin, sayı, mantıksal, nesne veya dizi); değer yoksa `defaultValue`. */
+    getValue: async <T extends FeatureFlagValue = FeatureFlagValue>(key: string, defaultValue: T | null = null): Promise<T | null> => {
+      const result = await this.bridge.call<{ value?: FeatureFlagValue } | undefined>('featureFlagsGetValue', {
+        key: requireString(key, 'key'),
+      });
+      const value = result?.value;
+      return value === undefined || value === null ? defaultValue : (value as T);
+    },
+  };
+
+  // --- Gömülü yerleşimler (ADR-0068) ---
+
+  /**
+   * Gömülü yerleşimler: uygulamanın ayırdığı alana içerik. Model döner, çizim uygulamanındır; içerik ekrana gelince
+   * `reportImpression`, düğme tıklanınca `reportClick`, kapatılınca `reportDismiss` çağrılır.
+   */
+  readonly Placements = {
+    /** Alanın içeriği (`limit` 1-10, varsayılan 1). Abonelik yoksa veya gizlilik onayı bekleniyorsa boş döner. */
+    list: async (key: string, options: PlacementListOptions = {}): Promise<InAppMessage[]> => {
+      if (typeof key !== 'string' || !PLACEMENT_KEY.test(key)) throw new TypeError('Pushizo: geçersiz yerleşim anahtarı.');
+      const limit = options.limit ?? 1;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new RangeError('Pushizo: limit 1-10 olmalı.');
+      const result = await this.bridge.call<{ messages?: InAppMessage[] } | undefined>('placementsList', { key, limit });
+      return Array.isArray(result?.messages) ? result.messages : [];
+    },
+    /** Raporlar `list` ile alınmış mesaj içindir; native katmanın tanımadığı mesaj yok sayılır. */
+    reportImpression: async (message: Pick<InAppMessage, 'id'>): Promise<void> =>
+      this.bridge.call('placementsReportImpression', { id: placementMessageId(message) }),
+    reportClick: async (message: Pick<InAppMessage, 'id'>, buttonId: string): Promise<void> =>
+      this.bridge.call('placementsReportClick', { id: placementMessageId(message), buttonId: requireString(buttonId, 'buttonId') }),
+    reportDismiss: async (message: Pick<InAppMessage, 'id'>): Promise<void> =>
+      this.bridge.call('placementsReportDismiss', { id: placementMessageId(message) }),
+  };
+
   // --- Konum (v2 Faz 17b) ---
 
   /**
-   * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
-   * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
-   * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
-   * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
-   * reddedilir (web: Web SDK hatası).
+   * Konum paylaşımı (yalnızca ön plan; arka planda koordinat toplanmaz, bölge izleme için `setGeofencingEnabled`).
+   * Paylaşım açıkken native SDK konumu oturum başında ve uygulama ön plana döndüğünde en sık 5 dakikada bir push
+   * aboneliğine yazar; izin yoksa veya gizlilik onayı verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık
+   * rıza kaydı sayılır; `setShared(false)` konumu ve rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde
+   * `setShared`/`requestPermission`/`setGeofencingEnabled` `NOT_READY` ile reddedilir (web: Web SDK hatası).
    */
   readonly Location = {
     /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
@@ -788,6 +849,16 @@ export class PushizoCore {
       if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
       return Boolean((await this.bridge.call<{ permission: boolean }>('requestLocationPermission', args)).permission);
     },
+    /**
+     * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
+     * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir; köprü izin istemez ve
+     * manifest/Info.plist'e izin eklemez.
+     */
+    setGeofencingEnabled: (enabled: boolean): Promise<void> =>
+      this.bridge.call('setGeofencingEnabled', { enabled: Boolean(enabled) }),
+    /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
+    isGeofencingEnabled: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ enabled: boolean } | undefined>('isGeofencingEnabled'))?.enabled),
   };
 
   // --- Live Activities (iOS) ---

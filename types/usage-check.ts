@@ -25,6 +25,25 @@ async function usage(): Promise<void> {
   await window.Pushizo.Location.setShared(granted);
   const shared: boolean = await Pushizo.Location.isShared();
   void shared;
+  await Pushizo.Location.setGeofencingEnabled(shared);
+  const geofencing: boolean = await window.Pushizo.Location.isGeofencingEnabled();
+  void geofencing;
+  const refreshed: boolean = await Pushizo.FeatureFlags.refresh();
+  const enabled: boolean = await Pushizo.FeatureFlags.isEnabled('yeni_sepet', refreshed);
+  const limit: number | null = await window.Pushizo.FeatureFlags.getValue('sepet_limiti', 10);
+  const raw: Pushizo.FeatureFlagValue = await Pushizo.FeatureFlags.getValue('tema');
+  void enabled;
+  void limit;
+  void raw;
+  const options: Pushizo.PlacementListOptions = { limit: 2 };
+  const messages: Pushizo.InAppMessage[] = await Pushizo.Placements.list('home_banner', options);
+  const placement: Pushizo.InAppMessage | undefined = messages[0];
+  if (placement) {
+    const block: Pushizo.InAppBlock | undefined = placement.display.blocks[0];
+    if (block?.type === 'button') await window.Pushizo.Placements.reportClick(placement, block.id);
+    await Pushizo.Placements.reportImpression(placement);
+    await Pushizo.Placements.reportDismiss(placement);
+  }
 }
 
 void usage;

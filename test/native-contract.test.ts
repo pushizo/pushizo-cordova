@@ -119,6 +119,53 @@ describe('native sözleşme', () => {
     expect(swift).toContain('Pushizo.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }');
   });
 
+  it('Bölge izleme, özellik bayrakları ve yerleşimler native SDK çağrılarına bağlı', () => {
+    for (const m of [
+      'setGeofencingEnabled', 'isGeofencingEnabled', 'featureFlagsRefresh', 'featureFlagsIsEnabled', 'featureFlagsGetValue',
+      'placementsList', 'placementsReportImpression', 'placementsReportClick', 'placementsReportDismiss',
+    ]) {
+      expect(methods.has(m), m).toBe(true);
+    }
+    const kt = read('src/android/com/pushizo/cordova/PushizoBridgeCore.kt');
+    const swift = read('src/ios/PushizoBridgeCore.swift');
+    expect(kt).toContain('Pushizo.Location.setGeofencingEnabled(args.optBoolean("enabled", false))');
+    expect(kt).toContain('"isGeofencingEnabled" -> reply.success(JSONObject().put("enabled", Pushizo.Location.isGeofencingEnabled))');
+    expect(kt).toContain('"featureFlagsRefresh" -> Pushizo.FeatureFlags.refresh { ok -> reply.success(JSONObject().put("success", ok)) }');
+    expect(kt).toContain('Pushizo.FeatureFlags.isEnabled(args.requireString("key"), args.optBoolean("defaultValue", false))');
+    expect(kt).toContain('Pushizo.FeatureFlags.getValue(args.requireString("key")).orNull()');
+    expect(kt).toContain('"placementsList" -> Pushizo.Placements.list(args.requireString("key"), args.optInt("limit", 1))');
+    expect(kt).toContain('Pushizo.Placements.reportImpression(it)');
+    expect(kt).toContain('Pushizo.Placements.reportClick(it, buttonId)');
+    expect(kt).toContain('Pushizo.Placements.reportDismiss(it)');
+    // Rapor çağrıları son `list` yanıtlarındaki mesajla yapılır (sınırlı önbellek); bulunamazsa yalnızca debug log.
+    expect(kt).toContain('private const val MAX_PLACEMENT_CACHE = 50');
+    expect(kt).toContain('HsLog.d("yerleşim mesajı bulunamadı: $id")');
+    expect(kt).toContain('fun HsInAppMessage.toBridgeJson(): JSONObject');
+    // Köprü arka plan konum izni istemez ve manifeste eklemez (ADR-0065 §2).
+    expect(kt).not.toContain('ACCESS_BACKGROUND_LOCATION');
+
+    expect(swift).toContain('Pushizo.Location.setGeofencingEnabled(args["enabled"] as? Bool ?? false)');
+    expect(swift).toContain('case "isGeofencingEnabled": ok(["enabled": Pushizo.Location.isGeofencingEnabled])');
+    expect(swift).toContain('let success = await Pushizo.FeatureFlags.refresh()');
+    expect(swift).toContain('Pushizo.FeatureFlags.isEnabled(key, default: args["defaultValue"] as? Bool ?? false)');
+    expect(swift).toContain('ok(["value": Self.orNull(Pushizo.FeatureFlags.value(key))])');
+    expect(swift).toContain('let messages = try await Pushizo.Placements.list(key, limit: limit)');
+    expect(swift).toContain('Pushizo.Placements.reportImpression(message)');
+    expect(swift).toContain('Pushizo.Placements.reportClick(message, buttonId: buttonId)');
+    expect(swift).toContain('Pushizo.Placements.reportDismiss(message)');
+    expect(swift).toContain('private static let maxPlacementCache = 50');
+    expect(swift).toContain('static func map(_ m: HSInAppMessage) -> [String: Any]');
+    expect(swift).not.toContain('requestAlwaysPermission');
+    expect(read('plugin.xml')).not.toContain('ACCESS_BACKGROUND_LOCATION');
+  });
+
+  it('yerel SDK bağımlılıkları bayrak/yerleşim/bölge izleme sunan sürümlerde (Android 0.2.1, iOS 0.2)', () => {
+    const xml = read('plugin.xml');
+    expect(xml).toContain('<framework src="com.pushizo:pushizo-android:0.2.1" />');
+    expect(xml).toContain('<pod name="Pushizo" spec="~> 0.2" />');
+    expect((JSON.parse(read('package.json')) as { version: string }).version).toBe('0.2.0');
+  });
+
   it('plugin.xml dosya başvuruları mevcut', () => {
     const xml = read('plugin.xml');
     const refs = [...xml.matchAll(/<(?:js-module|source-file|framework)[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]).filter((s) => !s.includes(':'));

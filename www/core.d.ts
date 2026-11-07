@@ -1,4 +1,4 @@
-import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -196,11 +196,35 @@ export declare class PushizoCore {
     private onChatEvent;
     private onChatOpen;
     /**
-     * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
-     * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
-     * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
-     * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
-     * reddedilir (web: Web SDK hatası).
+     * Özellik bayrakları: değerler native SDK'da oturum başında yenilenir ve cihazda saklanır; ağ yoksa son değer, hiç
+     * alınmadıysa verilen varsayılan döner. Gizlilik onayı beklenirken istek gönderilmez.
+     */
+    readonly FeatureFlags: {
+        /** Değerleri sunucudan hemen yeniler; yeni değerler alındıysa true (hata son değerleri korur). */
+        refresh: () => Promise<boolean>;
+        /** Bayrak bu kullanıcı için açık mı; değer henüz yoksa `defaultValue`. */
+        isEnabled: (key: string, defaultValue?: boolean) => Promise<boolean>;
+        /** Bayrağın değeri (metin, sayı, mantıksal, nesne veya dizi); değer yoksa `defaultValue`. */
+        getValue: <T extends FeatureFlagValue = FeatureFlagValue>(key: string, defaultValue?: T | null) => Promise<T | null>;
+    };
+    /**
+     * Gömülü yerleşimler: uygulamanın ayırdığı alana içerik. Model döner, çizim uygulamanındır; içerik ekrana gelince
+     * `reportImpression`, düğme tıklanınca `reportClick`, kapatılınca `reportDismiss` çağrılır.
+     */
+    readonly Placements: {
+        /** Alanın içeriği (`limit` 1-10, varsayılan 1). Abonelik yoksa veya gizlilik onayı bekleniyorsa boş döner. */
+        list: (key: string, options?: PlacementListOptions) => Promise<InAppMessage[]>;
+        /** Raporlar `list` ile alınmış mesaj içindir; native katmanın tanımadığı mesaj yok sayılır. */
+        reportImpression: (message: Pick<InAppMessage, "id">) => Promise<void>;
+        reportClick: (message: Pick<InAppMessage, "id">, buttonId: string) => Promise<void>;
+        reportDismiss: (message: Pick<InAppMessage, "id">) => Promise<void>;
+    };
+    /**
+     * Konum paylaşımı (yalnızca ön plan; arka planda koordinat toplanmaz, bölge izleme için `setGeofencingEnabled`).
+     * Paylaşım açıkken native SDK konumu oturum başında ve uygulama ön plana döndüğünde en sık 5 dakikada bir push
+     * aboneliğine yazar; izin yoksa veya gizlilik onayı verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık
+     * rıza kaydı sayılır; `setShared(false)` konumu ve rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde
+     * `setShared`/`requestPermission`/`setGeofencingEnabled` `NOT_READY` ile reddedilir (web: Web SDK hatası).
      */
     readonly Location: {
         /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
@@ -216,6 +240,14 @@ export declare class PushizoCore {
          * açılmaz. Sonuç: izin varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false.
          */
         requestPermission: (rationale?: string) => Promise<boolean>;
+        /**
+         * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
+         * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir; köprü izin istemez ve
+         * manifest/Info.plist'e izin eklemez.
+         */
+        setGeofencingEnabled: (enabled: boolean) => Promise<void>;
+        /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
+        isGeofencingEnabled: () => Promise<boolean>;
     };
     /**
      * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `PushizoDefaultLiveActivityAttributes` türünü kullanır;

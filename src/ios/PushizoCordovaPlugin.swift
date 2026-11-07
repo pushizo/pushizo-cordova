@@ -138,6 +138,15 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setLocationShared:) func setLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(isLocationShared:) func isLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setGeofencingEnabled:) func setGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(isGeofencingEnabled:) func isGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsRefresh:) func featureFlagsRefresh(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsIsEnabled:) func featureFlagsIsEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsGetValue:) func featureFlagsGetValue(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsList:) func placementsList(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportImpression:) func placementsReportImpression(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportClick:) func placementsReportClick(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportDismiss:) func placementsReportDismiss(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatStart:) func chatStart(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetConfig:) func chatGetConfig(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetConversation:) func chatGetConversation(_ command: CDVInvokedUrlCommand) { dispatch(command) }

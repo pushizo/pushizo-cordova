@@ -13,9 +13,15 @@ import com.pushizo.sdk.HsChatEventAdapter
 import com.pushizo.sdk.HsChatOpenListener
 import com.pushizo.sdk.HsClickEvent
 import com.pushizo.sdk.HsForegroundEvent
+import com.pushizo.sdk.HsInAppAction
+import com.pushizo.sdk.HsInAppBlock
+import com.pushizo.sdk.HsInAppCarouselCard
 import com.pushizo.sdk.HsInAppClickEvent
+import com.pushizo.sdk.HsInAppDisplay
 import com.pushizo.sdk.HsInAppLifecycleEvent
 import com.pushizo.sdk.HsInAppLifecycleListener
+import com.pushizo.sdk.HsInAppMessage
+import com.pushizo.sdk.HsInAppTrigger
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -53,6 +59,11 @@ internal class PushizoBridgeCore(
     /** Karar bekleyen ön plan bildirimleri; en eski kayıtlar düşürülür (sınırlı bellek). */
     private val pendingForeground = object : LinkedHashMap<String, HsForegroundEvent>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, HsForegroundEvent>?): Boolean = size > MAX_PENDING_FOREGROUND
+    }
+
+    /** Son `placementsList` yanıtlarındaki mesajlar (kimliğe göre); raporlar bu nesnelerle yapılır, en eski kayıtlar düşürülür. */
+    private val placementMessages = object : LinkedHashMap<String, HsInAppMessage>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, HsInAppMessage>?): Boolean = size > MAX_PLACEMENT_CACHE
     }
 
     private val clickListener: (HsClickEvent) -> Unit = { e ->
@@ -311,6 +322,35 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "isLocationShared" -> reply.success(JSONObject().put("shared", Pushizo.Location.isShared))
+                // Arka plan bölge izleme (ADR-0065): varsayılan kapalı; köprü izin istemez, manifest'e izin eklemez.
+                "setGeofencingEnabled" -> {
+                    check(Pushizo.isInitialized) { NOT_INITIALIZED }
+                    Pushizo.Location.setGeofencingEnabled(args.optBoolean("enabled", false))
+                    reply.success(null)
+                }
+                "isGeofencingEnabled" -> reply.success(JSONObject().put("enabled", Pushizo.Location.isGeofencingEnabled))
+
+                // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur; `refresh` geri çağrısı arka plan iş parçacığındadır.
+                "featureFlagsRefresh" -> Pushizo.FeatureFlags.refresh { ok -> reply.success(JSONObject().put("success", ok)) }
+                "featureFlagsIsEnabled" -> reply.success(
+                    JSONObject().put("enabled", Pushizo.FeatureFlags.isEnabled(args.requireString("key"), args.optBoolean("defaultValue", false))),
+                )
+                "featureFlagsGetValue" -> reply.success(JSONObject().put("value", Pushizo.FeatureFlags.getValue(args.requireString("key")).orNull()))
+
+                // Gömülü yerleşimler (ADR-0068): anahtar ve limit denetimi yerel SDK'dadır (IllegalArgumentException → INVALID_ARGUMENT).
+                "placementsList" -> Pushizo.Placements.list(args.requireString("key"), args.optInt("limit", 1)) { messages ->
+                    synchronized(placementMessages) {
+                        messages.forEach { placementMessages.remove(it.id); placementMessages[it.id] = it }
+                    }
+                    reply.success(JSONObject().put("messages", JSONArray(messages.map { it.toBridgeJson() })))
+                }
+                "placementsReportImpression" -> { placementMessage(args)?.let { Pushizo.Placements.reportImpression(it) }; reply.success(null) }
+                "placementsReportClick" -> {
+                    val buttonId = args.requireString("buttonId")
+                    placementMessage(args)?.let { Pushizo.Placements.reportClick(it, buttonId) }
+                    reply.success(null)
+                }
+                "placementsReportDismiss" -> { placementMessage(args)?.let { Pushizo.Placements.reportDismiss(it) }; reply.success(null) }
 
                 // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
                 "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
@@ -360,6 +400,15 @@ internal class PushizoBridgeCore(
         return true
     }
 
+    /** Rapor için mesajı son `placementsList` yanıtlarından bulur; bulunamazsa yok sayılır (yalnızca debug log). */
+    private fun placementMessage(args: JSONObject): HsInAppMessage? {
+        val id = args.requireString("id")
+        return synchronized(placementMessages) { placementMessages[id] } ?: run {
+            HsLog.d("yerleşim mesajı bulunamadı: $id")
+            null
+        }
+    }
+
     /** SDK geri çağrısını köprü yanıtına çevirir; API hatasında sunucu kodu korunur. */
     private fun <T> callback(reply: Reply, map: (T) -> JSONObject?) = HsCallback<T> { result ->
         result.fold(
@@ -378,6 +427,7 @@ internal class PushizoBridgeCore(
 
     companion object {
         private const val MAX_PENDING_FOREGROUND = 32
+        private const val MAX_PLACEMENT_CACHE = 50
         private const val NOT_INITIALIZED = "Önce Pushizo.initialize çağrılmalı"
         private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         private const val LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"
@@ -445,6 +495,73 @@ internal class PushizoBridgeCore(
         fun HsPreferencesResult.toJson(): JSONObject = JSONObject()
             .put("preferences", JSONArray(preferences.map { it.toJson() }))
             .put("categories", JSONArray(categories.map { it.toJson() }))
+
+        // In-app mesaj modeli → JS `InAppMessage` (alanlar yerel modelle aynı; zamanlar epoch milisaniye).
+        fun HsInAppMessage.toBridgeJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("priority", priority)
+            .put("triggers", JSONArray(triggers.map { it.toJson() }))
+            .put("triggerGroups", JSONArray(triggerGroups.map { group -> JSONArray(group.map { it.toJson() }) }))
+            .put("variantId", variantId.orNull())
+            .put("display", display.toJson())
+            .put("remainingImpressions", remainingImpressions)
+            .put("minIntervalSeconds", minIntervalSeconds)
+            .put("stopAfterInteraction", stopAfterInteraction)
+            .put("lastImpressionAt", lastImpressionAt.orNull())
+            .put("endAt", endAt.orNull())
+            .put("language", language.orNull())
+
+        fun HsInAppDisplay.toJson(): JSONObject = JSONObject()
+            .put("layout", layout.wire)
+            .put("backgroundColor", backgroundColor.orNull())
+            .put("textColor", textColor.orNull())
+            .put("dismissible", dismissible)
+            .put("autoDismissSeconds", autoDismissSeconds.orNull())
+            .put("contentType", contentType.wire)
+            .put("blocks", JSONArray(blocks.map { it.toJson() }))
+            .put("html", html.orNull())
+            .put("htmlHeight", htmlHeight.orNull())
+
+        fun HsInAppTrigger.toJson(): JSONObject = when (this) {
+            HsInAppTrigger.SessionStart -> JSONObject().put("kind", "session_start")
+            is HsInAppTrigger.Event -> JSONObject().put("kind", "event").put("name", name)
+            is HsInAppTrigger.Screen -> JSONObject().put("kind", "screen").put("name", name)
+            is HsInAppTrigger.Condition -> JSONObject().put("kind", "trigger").put("key", key).put("op", op).put("value", value.orNull())
+            is HsInAppTrigger.SessionDuration -> JSONObject().put("kind", "session_duration").put("seconds", seconds)
+            is HsInAppTrigger.Unsupported -> JSONObject().put("kind", "unsupported").put("name", kind)
+        }
+
+        fun HsInAppAction.toJson(): JSONObject = when (this) {
+            HsInAppAction.Dismiss -> JSONObject().put("type", "dismiss")
+            is HsInAppAction.Url -> JSONObject().put("type", "url").put("url", url)
+            is HsInAppAction.Deeplink -> JSONObject().put("type", "deeplink").put("url", url)
+            is HsInAppAction.Tags -> JSONObject().put("type", "tags").put("tags", JSONObject(tags))
+            HsInAppAction.PushPrompt -> JSONObject().put("type", "push_prompt")
+            is HsInAppAction.Outcome -> JSONObject().put("type", "outcome").put("name", name).put("value", value.orNull())
+        }
+
+        fun HsInAppBlock.Button.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("text", text)
+            .put("action", action.toJson())
+            .put("backgroundColor", backgroundColor.orNull())
+            .put("textColor", textColor.orNull())
+
+        fun HsInAppCarouselCard.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("title", title)
+            .put("body", body.orNull())
+            .put("imageUrl", imageUrl.orNull())
+            .put("imageAlt", imageAlt.orNull())
+            .put("button", button?.toJson().orNull())
+
+        fun HsInAppBlock.toJson(): JSONObject = when (this) {
+            is HsInAppBlock.Image -> JSONObject().put("type", "image").put("url", url).put("alt", alt.orNull())
+            is HsInAppBlock.Title -> JSONObject().put("type", "title").put("text", text)
+            is HsInAppBlock.Body -> JSONObject().put("type", "body").put("text", text)
+            is HsInAppBlock.Button -> toJson().put("type", "button")
+            is HsInAppBlock.Carousel -> JSONObject().put("type", "carousel").put("id", id).put("cards", JSONArray(cards.map { it.toJson() }))
+        }
 
         /** JS `{ category, channel, optedIn }[]` → SDK girdisi; kural denetimi (1-100, kanal) SDK'dadır. */
         fun JSONObject.preferenceInputs(key: String): List<HsPreferenceInput> {

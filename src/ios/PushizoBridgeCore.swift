@@ -55,6 +55,7 @@ final class PushizoBridgeCore: NSObject {
     fileprivate static weak var active: PushizoBridgeCore?
     private static var listenersRegistered = false
     private static let maxPendingForeground = 32
+    private static let maxPlacementCache = 50
     private static let notInitialized = "Önce Pushizo.initialize çağrılmalı"
 
     private let emit: (String, [String: Any]) -> Void
@@ -63,6 +64,9 @@ final class PushizoBridgeCore: NSObject {
     private var foregroundSeq = 0
     private var pendingForeground: [String: HSForegroundEvent] = [:]
     private var pendingOrder: [String] = []
+    /// Son `placementsList` yanıtlarındaki mesajlar (kimliğe göre); raporlar bu nesnelerle yapılır, en eski kayıtlar düşürülür.
+    private var placementMessages: [String: HSInAppMessage] = [:]
+    private var placementOrder: [String] = []
     private let lock = NSLock()
 
     init(emit: @escaping (String, [String: Any]) -> Void) {
@@ -138,6 +142,30 @@ final class PushizoBridgeCore: NSObject {
         defer { lock.unlock() }
         pendingOrder.removeAll { $0 == id }
         return pendingForeground.removeValue(forKey: id)
+    }
+
+    private func rememberPlacements(_ messages: [HSInAppMessage]) {
+        lock.lock()
+        defer { lock.unlock() }
+        for message in messages {
+            placementOrder.removeAll { $0 == message.id }
+            placementMessages[message.id] = message
+            placementOrder.append(message.id)
+        }
+        while placementOrder.count > Self.maxPlacementCache {
+            placementMessages.removeValue(forKey: placementOrder.removeFirst())
+        }
+    }
+
+    /// Rapor için mesajı son `placementsList` yanıtlarından bulur; bulunamazsa yok sayılır (yalnızca debug log).
+    private func placementMessage(_ id: String) -> HSInAppMessage? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let message = placementMessages[id] else {
+            if HSLog.level.rawValue >= HSLog.Level.debug.rawValue { print("[Pushizo] yerleşim mesajı bulunamadı: \(id)") }
+            return nil
+        }
+        return message
     }
 
     fileprivate func emitLifecycle(_ event: String, _ message: HSInAppMessage) {
@@ -300,6 +328,46 @@ final class PushizoBridgeCore: NSObject {
             guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
             // Açıklama uyarısı + `requestWhenInUseAuthorization`; sonuç ana iş parçacığında döner.
             Pushizo.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }
+        // Arka plan bölge izleme (ADR-0065): varsayılan kapalı; köprü izin istemez, Info.plist'e izin eklemez.
+        case "setGeofencingEnabled":
+            guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            Pushizo.Location.setGeofencingEnabled(args["enabled"] as? Bool ?? false); ok()
+        case "isGeofencingEnabled": ok(["enabled": Pushizo.Location.isGeofencingEnabled])
+
+        // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur.
+        case "featureFlagsRefresh":
+            Task {
+                let success = await Pushizo.FeatureFlags.refresh()
+                DispatchQueue.main.async { ok(["success": success]) }
+            }
+        case "featureFlagsIsEnabled":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            ok(["enabled": Pushizo.FeatureFlags.isEnabled(key, default: args["defaultValue"] as? Bool ?? false)])
+        case "featureFlagsGetValue":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            ok(["value": Self.orNull(Pushizo.FeatureFlags.value(key))])
+
+        // Gömülü yerleşimler (ADR-0068): anahtar ve limit denetimi yerel SDK'dadır (HSError.invalidArgument → INVALID_ARGUMENT).
+        case "placementsList":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            let limit = (args["limit"] as? NSNumber)?.intValue ?? 1
+            inbox(reply) {
+                let messages = try await Pushizo.Placements.list(key, limit: limit)
+                self.rememberPlacements(messages)
+                return ["messages": messages.map { Self.map($0) }]
+            }
+        case "placementsReportImpression":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportImpression(message) }
+            ok()
+        case "placementsReportClick":
+            guard let id = string("id"), let buttonId = string("buttonId") else { invalid("id ve buttonId gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportClick(message, buttonId: buttonId) }
+            ok()
+        case "placementsReportDismiss":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportDismiss(message) }
+            ok()
 
         // Canlı sohbet (ADR-0040): kimlik, kuyruk, akış ve push yerel SDK'dadır.
         case "chatStart":
@@ -452,6 +520,73 @@ final class PushizoBridgeCore: NSObject {
 
     static func map(_ page: HSInboxPage) -> [String: Any] {
         ["items": page.items.map { map($0) }, "unreadCount": page.unreadCount, "nextCursor": orNull(page.nextCursor), "hasMore": page.hasMore]
+    }
+
+    // In-app mesaj modeli → JS `InAppMessage` (alanlar yerel modelle aynı; zamanlar epoch milisaniye).
+    static func map(_ m: HSInAppMessage) -> [String: Any] {
+        ["id": m.id, "priority": m.priority,
+         "triggers": m.triggers.map { map($0) }, "triggerGroups": m.triggerGroups.map { group in group.map { map($0) } },
+         "variantId": orNull(m.variantId), "display": map(m.display),
+         "remainingImpressions": m.remainingImpressions, "minIntervalSeconds": m.minIntervalSeconds,
+         "stopAfterInteraction": m.stopAfterInteraction, "lastImpressionAt": millis(m.lastImpressionAt), "endAt": millis(m.endAt),
+         "language": orNull(m.language)]
+    }
+
+    static func map(_ d: HSInAppDisplay) -> [String: Any] {
+        ["layout": d.layout.rawValue, "backgroundColor": orNull(d.backgroundColor), "textColor": orNull(d.textColor),
+         "dismissible": d.dismissible, "autoDismissSeconds": orNull(d.autoDismissSeconds), "contentType": d.contentType.rawValue,
+         "blocks": d.blocks.map { map($0) }, "html": orNull(d.html), "htmlHeight": orNull(d.htmlHeight)]
+    }
+
+    static func map(_ t: HSInAppTrigger) -> [String: Any] {
+        switch t {
+        case .sessionStart: return ["kind": "session_start"]
+        case let .event(name): return ["kind": "event", "name": name]
+        case let .screen(name): return ["kind": "screen", "name": name]
+        case let .condition(key, op, value):
+            let raw: Any
+            switch value {
+            case .string(let s)?: raw = s
+            case .number(let n)?: raw = n
+            case nil: raw = NSNull()
+            }
+            return ["kind": "trigger", "key": key, "op": op, "value": raw]
+        case let .sessionDuration(seconds): return ["kind": "session_duration", "seconds": seconds]
+        case let .unsupported(kind): return ["kind": "unsupported", "name": kind]
+        }
+    }
+
+    static func map(_ a: HSInAppAction) -> [String: Any] {
+        switch a {
+        case .dismiss: return ["type": "dismiss"]
+        case let .url(url): return ["type": "url", "url": url]
+        case let .deeplink(url): return ["type": "deeplink", "url": url]
+        case let .tags(tags): return ["type": "tags", "tags": tags]
+        case .pushPrompt: return ["type": "push_prompt"]
+        case let .outcome(name, value): return ["type": "outcome", "name": name, "value": orNull(value)]
+        }
+    }
+
+    static func map(_ b: HSInAppButton) -> [String: Any] {
+        ["id": b.id, "text": b.text, "action": map(b.action), "backgroundColor": orNull(b.backgroundColor), "textColor": orNull(b.textColor)]
+    }
+
+    static func map(_ c: HSInAppCarouselCard) -> [String: Any] {
+        ["id": c.id, "title": c.title, "body": orNull(c.body), "imageUrl": orNull(c.imageUrl), "imageAlt": orNull(c.imageAlt),
+         "button": c.button.map { map($0) } ?? NSNull()]
+    }
+
+    static func map(_ block: HSInAppBlock) -> [String: Any] {
+        switch block {
+        case let .image(url, alt): return ["type": "image", "url": url, "alt": orNull(alt)]
+        case let .title(text): return ["type": "title", "text": text]
+        case let .body(text): return ["type": "body", "text": text]
+        case let .button(button):
+            var json = map(button)
+            json["type"] = "button"
+            return json
+        case let .carousel(carousel): return ["type": "carousel", "id": carousel.id, "cards": carousel.cards.map { map($0) }]
+        }
     }
 }
 

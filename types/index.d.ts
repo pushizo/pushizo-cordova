@@ -21,6 +21,16 @@ declare namespace Pushizo {
   type InAppLifecycleEvent = Definitions.InAppLifecycleEvent;
   type InAppLifecycleListener = Definitions.InAppLifecycleListener;
   type InAppTriggerValue = Definitions.InAppTriggerValue;
+  type FeatureFlagValue = Definitions.FeatureFlagValue;
+  type InAppMessage = Definitions.InAppMessage;
+  type InAppDisplay = Definitions.InAppDisplay;
+  type InAppLayout = Definitions.InAppLayout;
+  type InAppBlock = Definitions.InAppBlock;
+  type InAppButton = Definitions.InAppButton;
+  type InAppCarouselCard = Definitions.InAppCarouselCard;
+  type InAppAction = Definitions.InAppAction;
+  type InAppTrigger = Definitions.InAppTrigger;
+  type PlacementListOptions = Definitions.PlacementListOptions;
   type LiveActivityValue = Definitions.LiveActivityValue;
   type InboxItem = Definitions.InboxItem;
   type InboxPage = Definitions.InboxPage;
