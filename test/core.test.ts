@@ -487,7 +487,7 @@ describe('PushizoCore', () => {
     const hs = new PushizoCore(f.bridge);
     expect(await hs.Placements.list('home_banner')).toEqual([message]);
     expect(await hs.Placements.list('a.b-c_1', { limit: 10 })).toEqual([message]);
-    await hs.Placements.reportImpression(message as never);
+    await hs.Placements.reportImpression(message);
     await hs.Placements.reportClick({ id: 'iam_1' }, 'btn_1');
     await hs.Placements.reportDismiss({ id: 'iam_1' });
     expect(f.calls.map((c) => [c.method, c.args])).toEqual([
