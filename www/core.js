@@ -337,6 +337,22 @@ class PushizoCore {
             archive: (id) => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
             unreadCount: async () => { var _a; return (_a = (await this.bridge.call('inboxUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
         };
+        // --- İçerik kartları (ADR-0082) ---
+        this.ContentCards = {
+            /** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı; `limit` 1-100 (varsayılan 50). */
+            list: (limit = 50) => {
+                if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+                    return Promise.reject(new RangeError('Pushizo: limit 1-100 olmalı.'));
+                }
+                return this.bridge.call('contentCardsList', { limit });
+            },
+            /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+            logImpression: (id) => this.cardEvent(id, 'impression'),
+            /** Karta tıklandı (gösterim de sayılır). */
+            logClick: (id) => this.cardEvent(id, 'click'),
+            /** Kart kapatıldı; akıştan kalkar. */
+            dismiss: (id) => this.cardEvent(id, 'dismiss'),
+        };
         // --- Canlı sohbet (ADR-0040) ---
         /**
          * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
@@ -731,6 +747,9 @@ class PushizoCore {
     /** Kullanıcıyı anonim kullanıcıya döndürür; kimlik JWT'si cihazdan silinir. */
     logout() {
         return this.bridge.call('logout');
+    }
+    cardEvent(id, event) {
+        return this.bridge.call('contentCardEvent', { id: requireString(id, 'id'), event });
     }
     /** Native sohbet olayını türüne göre dağıtır. */
     onChatEvent(raw) {

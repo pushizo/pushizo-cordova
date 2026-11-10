@@ -35,6 +35,9 @@ declare namespace Pushizo {
   type InboxItem = Definitions.InboxItem;
   type InboxPage = Definitions.InboxPage;
   type InboxListOptions = Definitions.InboxListOptions;
+  type ContentCard = Definitions.ContentCard;
+  type ContentCardFeed = Definitions.ContentCardFeed;
+  type ContentCardType = Definitions.ContentCardType;
   type PreferenceChannel = Definitions.PreferenceChannel;
   type UserPreference = Definitions.UserPreference;
   type PreferenceCategory = Definitions.PreferenceCategory;

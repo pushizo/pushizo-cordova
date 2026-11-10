@@ -22,6 +22,8 @@ import com.pushizo.sdk.HsInAppLifecycleEvent
 import com.pushizo.sdk.HsInAppLifecycleListener
 import com.pushizo.sdk.HsInAppMessage
 import com.pushizo.sdk.HsInAppTrigger
+import com.pushizo.sdk.HsContentCard
+import com.pushizo.sdk.HsContentCardFeed
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -314,6 +316,8 @@ internal class PushizoBridgeCore(
                 "inboxMarkAllRead" -> Pushizo.Inbox.markAllRead(callback(reply) { JSONObject().put("unreadCount", it) })
                 "inboxArchive" -> Pushizo.Inbox.archive(args.requireString("id"), callback(reply) { null })
                 "inboxUnreadCount" -> Pushizo.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
+                "contentCardsList" -> Pushizo.ContentCards.list(args.optInt("limit", 50), callback(reply) { it.toJson() })
+                "contentCardEvent" -> contentCardEvent(args.requireString("id"), args.optStringOrNull("event"), reply)
 
                 // Konum (v2 Faz 17b): izin isteği Activity gerektirdiğinden köprü sınıfında ele alınır.
                 "setLocationShared" -> {
@@ -410,6 +414,15 @@ internal class PushizoBridgeCore(
     }
 
     /** SDK geri çağrısını köprü yanıtına çevirir; API hatasında sunucu kodu korunur. */
+    // Kart olayı (ADR-0082): olay adı yerel SDK çağrısına eşlenir; bilinmeyen olay INVALID_ARGUMENT.
+    private fun contentCardEvent(id: String, event: String?, reply: Reply) {
+        val cb = callback<HsContentCard>(reply) { it.toJson() }
+        if (event == "impression") Pushizo.ContentCards.logImpression(id, cb)
+        else if (event == "click") Pushizo.ContentCards.logClick(id, cb)
+        else if (event == "dismiss") Pushizo.ContentCards.dismiss(id, cb)
+        else reply.error("INVALID_ARGUMENT", "Kart olayı impression, click veya dismiss olmalı.")
+    }
+
     private fun <T> callback(reply: Reply, map: (T) -> JSONObject?) = HsCallback<T> { result ->
         result.fold(
             onSuccess = { reply.success(map(it)) },
@@ -470,6 +483,27 @@ internal class PushizoBridgeCore(
             .put("archivedAt", archivedAt.orNull())
             .put("expiresAt", expiresAt.orNull())
             .put("createdAt", createdAt.orNull())
+
+        fun HsContentCard.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("messageId", messageId.orNull())
+            .put("type", type.wire)
+            .put("title", title.orNull())
+            .put("body", body.orNull())
+            .put("url", url.orNull())
+            .put("imageUrl", imageUrl.orNull())
+            .put("buttonText", buttonText.orNull())
+            .put("data", JSONObject(data))
+            .put("pinned", pinned)
+            .put("priority", priority)
+            .put("viewed", viewed)
+            .put("clicked", clicked)
+            .put("expiresAt", expiresAt.orNull())
+            .put("createdAt", createdAt.orNull())
+
+        fun HsContentCardFeed.toJson(): JSONObject = JSONObject()
+            .put("cards", JSONArray(cards.map { it.toJson() }))
+            .put("unviewedCount", unviewedCount)
 
         fun HsInboxPage.toJson(): JSONObject = JSONObject()
             .put("items", JSONArray(items.map { it.toJson() }))

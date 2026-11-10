@@ -375,6 +375,23 @@ describe('PushizoCore', () => {
     expect(f.calls.at(-1)).toEqual({ method: 'inboxArchive', args: { id: 'i1' } });
   });
 
+  it('içerik kartları: limit doğrulanır, olaylar köprüye iletilir', async () => {
+    const feed = { cards: [{ id: 'c1', type: 'classic' }], unviewedCount: 1 };
+    const f = fakeBridge({ contentCardsList: feed, contentCardEvent: { id: 'c1', viewed: true } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.ContentCards.list()).toEqual(feed);
+    expect(f.calls[0]).toEqual({ method: 'contentCardsList', args: { limit: 50 } });
+    await expect(hs.ContentCards.list(0)).rejects.toThrow(RangeError);
+    await expect(hs.ContentCards.list(101)).rejects.toThrow(RangeError);
+    expect(await hs.ContentCards.logImpression('c1')).toEqual({ id: 'c1', viewed: true });
+    expect(f.calls.at(-1)).toEqual({ method: 'contentCardEvent', args: { id: 'c1', event: 'impression' } });
+    await hs.ContentCards.logClick('c1');
+    expect(f.calls.at(-1)).toEqual({ method: 'contentCardEvent', args: { id: 'c1', event: 'click' } });
+    await hs.ContentCards.dismiss('c1');
+    expect(f.calls.at(-1)).toEqual({ method: 'contentCardEvent', args: { id: 'c1', event: 'dismiss' } });
+    expect(() => hs.ContentCards.logClick('')).toThrow();
+  });
+
   it('tercihler: girdi doğrulanır, native yanıtı normalize edilir', async () => {
     const raw = {
       preferences: [

@@ -10,6 +10,9 @@ async function usage(): Promise<void> {
   Pushizo.Notifications.addClickListener((e) => click(e));
   const page: Pushizo.InboxPage = await window.Pushizo.Inbox.list({ limit: 10 });
   void page.unreadCount;
+  const feed: Pushizo.ContentCardFeed = await window.Pushizo.ContentCards.list(20);
+  const card: Pushizo.ContentCard | undefined = feed.cards[0];
+  if (card) await Pushizo.ContentCards.logImpression(card.id);
   const input: Pushizo.PreferenceInput = { category: 'promo', channel: 'email', optedIn: false };
   const prefs: Pushizo.UserPreferences = await Pushizo.User.setPreferences([input]);
   const first: Pushizo.UserPreference | undefined = (await window.Pushizo.User.getPreferences()).preferences[0];

@@ -1,4 +1,4 @@
-import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -148,6 +148,17 @@ export declare class PushizoCore {
         archive: (id: string) => Promise<void>;
         unreadCount: () => Promise<number>;
     };
+    readonly ContentCards: {
+        /** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı; `limit` 1-100 (varsayılan 50). */
+        list: (limit?: number) => Promise<ContentCardFeed>;
+        /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+        logImpression: (id: string) => Promise<ContentCard>;
+        /** Karta tıklandı (gösterim de sayılır). */
+        logClick: (id: string) => Promise<ContentCard>;
+        /** Kart kapatıldı; akıştan kalkar. */
+        dismiss: (id: string) => Promise<ContentCard>;
+    };
+    private cardEvent;
     /**
      * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
      * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.

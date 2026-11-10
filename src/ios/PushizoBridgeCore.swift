@@ -319,6 +319,24 @@ final class PushizoBridgeCore: NSObject {
         case "inboxUnreadCount":
             inbox(reply) { ["unreadCount": try await Pushizo.Inbox.unreadCount()] }
 
+        // İçerik kartları (ADR-0082).
+        case "contentCardsList":
+            let limit = (args["limit"] as? NSNumber)?.intValue ?? 50
+            inbox(reply) { Self.map(try await Pushizo.ContentCards.list(limit: limit)) }
+        case "contentCardEvent":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            let event = string("event")
+            guard event == "impression" || event == "click" || event == "dismiss" else {
+                invalid("Kart olayı impression, click veya dismiss olmalı"); return true
+            }
+            inbox(reply) {
+                let card: HSContentCard
+                if event == "impression" { card = try await Pushizo.ContentCards.logImpression(id) }
+                else if event == "click" { card = try await Pushizo.ContentCards.logClick(id) }
+                else { card = try await Pushizo.ContentCards.dismiss(id) }
+                return Self.map(card)
+            }
+
         // Konum (v2 Faz 17b; yalnızca ön plan): yerel SDK başlatılmadan çağrılırsa sessizce yok sayılmaz, NOT_READY döner.
         case "setLocationShared":
             guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
@@ -516,6 +534,17 @@ final class PushizoBridgeCore: NSObject {
 
     static func map(_ r: HSPreferencesResult) -> [String: Any] {
         ["preferences": r.preferences.map { map($0) }, "categories": r.categories.map { map($0) }]
+    }
+
+    static func map(_ card: HSContentCard) -> [String: Any] {
+        ["id": card.id, "messageId": orNull(card.messageId), "type": card.type.rawValue, "title": orNull(card.title),
+         "body": orNull(card.body), "url": orNull(card.url), "imageUrl": orNull(card.imageUrl), "buttonText": orNull(card.buttonText),
+         "data": card.data, "pinned": card.pinned, "priority": card.priority, "viewed": card.viewed, "clicked": card.clicked,
+         "expiresAt": millis(card.expiresAt), "createdAt": millis(card.createdAt)]
+    }
+
+    static func map(_ feed: HSContentCardFeed) -> [String: Any] {
+        ["cards": feed.cards.map { map($0) }, "unviewedCount": feed.unviewedCount]
     }
 
     static func map(_ page: HSInboxPage) -> [String: Any] {

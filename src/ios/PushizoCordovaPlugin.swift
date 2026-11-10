@@ -134,6 +134,8 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(inboxMarkAllRead:) func inboxMarkAllRead(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxArchive:) func inboxArchive(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxUnreadCount:) func inboxUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(contentCardsList:) func contentCardsList(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(contentCardEvent:) func contentCardEvent(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setupDefaultLiveActivity:) func setupDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setLocationShared:) func setLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }

@@ -24,6 +24,9 @@ import type {
   InAppLifecycleListener,
   InAppMessage,
   InAppTriggerValue,
+  ContentCard,
+  ContentCardEvent,
+  ContentCardFeed,
   InboxItem,
   InboxListOptions,
   InboxPage,
@@ -620,6 +623,28 @@ export class PushizoCore {
     unreadCount: async (): Promise<number> =>
       (await this.bridge.call<{ unreadCount: number }>('inboxUnreadCount')).unreadCount ?? 0,
   };
+
+  // --- İçerik kartları (ADR-0082) ---
+
+  readonly ContentCards = {
+    /** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı; `limit` 1-100 (varsayılan 50). */
+    list: (limit = 50): Promise<ContentCardFeed> => {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        return Promise.reject(new RangeError('Pushizo: limit 1-100 olmalı.'));
+      }
+      return this.bridge.call<ContentCardFeed>('contentCardsList', { limit });
+    },
+    /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+    logImpression: (id: string): Promise<ContentCard> => this.cardEvent(id, 'impression'),
+    /** Karta tıklandı (gösterim de sayılır). */
+    logClick: (id: string): Promise<ContentCard> => this.cardEvent(id, 'click'),
+    /** Kart kapatıldı; akıştan kalkar. */
+    dismiss: (id: string): Promise<ContentCard> => this.cardEvent(id, 'dismiss'),
+  };
+
+  private cardEvent(id: string, event: ContentCardEvent): Promise<ContentCard> {
+    return this.bridge.call<ContentCard>('contentCardEvent', { id: requireString(id, 'id'), event });
+  }
 
   // --- Canlı sohbet (ADR-0040) ---
 
