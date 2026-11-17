@@ -178,4 +178,9 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(getLocationPermission:) func getLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(requestBackgroundLocationPermission:) func requestBackgroundLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatIsListening:) func chatIsListening(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatShow:) func chatShow(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatHide:) func chatHide(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatIsPresented:) func chatIsPresented(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setUserProperty:) func setUserProperty(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getBadgeCount:) func getBadgeCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

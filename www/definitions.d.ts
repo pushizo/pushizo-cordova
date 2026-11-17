@@ -139,6 +139,15 @@ export interface ContentCardFeed {
 }
 /** Kart olayı: gösterim, tıklama veya kapatma. */
 export type ContentCardEvent = 'impression' | 'click' | 'dismiss';
+/**
+ * `Inbox.addObserver` olayı (yerel `HsInboxChangeEvent` / `HSInboxChangeEvent`, Web SDK `InboxChangeEvent`).
+ * `itemId` yalnızca tek öğe olaylarında (`read`, `archived`) bulunur; `unreadCount` güncel okunmamış sayısıdır.
+ */
+export interface InboxChangeEvent {
+    type: 'listed' | 'read' | 'read_all' | 'archived' | 'count';
+    itemId?: string;
+    unreadCount: number;
+}
 export interface InboxListOptions {
     /** 1-200 (varsayılan 50). */
     limit?: number;
@@ -189,6 +198,18 @@ export interface PreferenceInput {
     channel?: PreferenceChannel | null;
 }
 export type InAppTriggerValue = string | number | boolean;
+/**
+ * `User.setProperty` değeri: metin, sonlu sayı, mantıksal ya da bunların dizisi/düz nesnesi. En üstteki `null` özelliği
+ * siler; iç içe `null` kabul edilmez.
+ */
+export type UserPropertyValue = string | number | boolean | null | UserPropertyValue[] | {
+    [key: string]: UserPropertyValue;
+};
+/** `Session.sendEvent` seçenekleri. */
+export interface SendEventOptions {
+    /** Tekilleştirme kimliği: 8-64 karakter; harf, rakam ve `. _ : -`. Biçim geçersizse yerel SDK kendi kimliğini üretir. */
+    eventId?: string;
+}
 /**
  * iOS Live Activity alan değeri (`PushizoDefaultLiveActivityAttributes.data` / `ContentState.data`): metin, sonlu
  * sayı veya mantıksal değer.

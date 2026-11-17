@@ -4,6 +4,7 @@ exports.PushizoCore = void 0;
 exports.normalizeNotification = normalizeNotification;
 const LOG_LEVELS = ['none', 'error', 'warn', 'info', 'debug'];
 const LIFECYCLE_EVENTS = ['willDisplay', 'didDisplay', 'willDismiss', 'didDismiss'];
+const INBOX_CHANGE_TYPES = ['listed', 'read', 'read_all', 'archived', 'count'];
 /** Dinleyici hatası diğer dinleyicileri ve native köprüyü etkilemez. */
 function safeInvoke(listener, event) {
     try {
@@ -32,6 +33,43 @@ function stringRecord(input, name) {
         }
         out[key] = String(value);
     }
+    return out;
+}
+/** Kullanıcı özelliği anahtarı en çok bu kadar karakterdir (yerel iOS SDK kuralı; daha uzunu orada sessizce yok sayılır). */
+const MAX_PROPERTY_KEY_LENGTH = 64;
+function propertyKey(value) {
+    const key = requireString(value, 'key').trim();
+    if (key.length > MAX_PROPERTY_KEY_LENGTH) {
+        throw new RangeError(`Pushizo: key en fazla ${MAX_PROPERTY_KEY_LENGTH} karakter olabilir.`);
+    }
+    return key;
+}
+/**
+ * `User.setProperty` değeri: metin, sonlu sayı, mantıksal ya da bunların dizisi/düz nesnesi. Yalnızca en üstteki
+ * `null`/`undefined` kabul edilir (özelliği siler); iç içe `null` yerel iOS SDK'da tüm yazmayı düşürdüğünden reddedilir.
+ */
+function propertyValue(value, name, nested = false) {
+    if (value === null || value === undefined) {
+        if (nested)
+            throw new TypeError(`Pushizo: ${name} null olamaz.`);
+        return null;
+    }
+    if (typeof value === 'string' || typeof value === 'boolean')
+        return value;
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value))
+            throw new TypeError(`Pushizo: ${name} sonlu bir sayı olmalı.`);
+        return value;
+    }
+    if (Array.isArray(value))
+        return value.map((item, i) => propertyValue(item, `${name}[${i}]`, true));
+    const proto = typeof value === 'object' ? Object.getPrototypeOf(value) : undefined;
+    if (typeof value !== 'object' || (proto !== Object.prototype && proto !== null)) {
+        throw new TypeError(`Pushizo: ${name} metin, sayı, mantıksal, dizi veya düz nesne olmalı.`);
+    }
+    const out = {};
+    for (const [key, item] of Object.entries(value))
+        out[key] = propertyValue(item, `${name}.${key}`, true);
     return out;
 }
 const CHAT_ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', 'text/plain'];
@@ -253,6 +291,8 @@ class PushizoCore {
         this.permissionObservers = new Set();
         this.inAppClickListeners = new Set();
         this.inAppLifecycleListeners = new Set();
+        this.featureFlagObservers = new Set();
+        this.inboxObservers = new Set();
         /** Dinleyici yokken gelen tıklamalar (soğuk başlatma); ilk dinleyiciye teslim edilir. */
         this.pendingClicks = [];
         /** Canlı sohbet dinleyicileri (tür başına). */
@@ -279,6 +319,11 @@ class PushizoCore {
             removeTags: (keys) => this.bridge.call('removeTags', { keys: keys.map((k) => requireString(k, 'key')) }),
             getTags: async () => { var _a; return (_a = (await this.bridge.call('getTags')).tags) !== null && _a !== void 0 ? _a : {}; },
             setLanguage: (code) => this.bridge.call('setLanguage', { code: requireString(code, 'code') }),
+            /**
+             * Kullanıcı özelliği yazar (ör. `setProperty('plan', 'pro')`); `null` özelliği siler. Değer metin, sayı, mantıksal ya da
+             * bunların dizisi/düz nesnesi olabilir; anahtar 1-64 karakterdir. Çevrimdışıyken yerel SDK kuyruğunda bekler.
+             */
+            setProperty: (key, value) => this.bridge.call('setUserProperty', { key: propertyKey(key), value: propertyValue(value, 'value') }),
             addAlias: (label, id) => this.bridge.call('addAliases', { aliases: { [requireString(label, 'label')]: requireString(id, 'id') } }),
             addAliases: (aliases) => this.bridge.call('addAliases', { aliases: stringRecord(aliases, 'aliases') }),
             removeAlias: (label) => this.bridge.call('removeAlias', { label: requireString(label, 'label') }),
@@ -351,17 +396,28 @@ class PushizoCore {
             /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
             removeGroupedNotifications: (group) => this.bridge.call('removeGroupedNotifications', { group: requireString(group, 'group') }),
             /**
-             * Uygulama rozetini ayarlar (yalnızca iOS; bildirim uzantısıyla paylaşılan sayaç da eşitlenir). Android'de rozet
-             * görünen bildirimlerden hesaplandığından ve web'de karşılığı olmadığından etkisizdir.
+             * Uygulama rozetini ayarlar; rozet bu cihazda gösterilebiliyorsa true döner. iOS: rozet ve bildirim uzantısıyla
+             * paylaşılan sayaç ayarlanır (her zaman true). Android: başlatıcı rozeti için "sayıyı ayarla" API'si yoktur; yerel SDK
+             * sayıyı saklar ve sonraki bildirimlere yazar (Android 8 öncesinde, bildirimler ya da kanal rozeti kapalıyken false).
+             * Web: App Badging API (yüklü PWA); tarayıcı desteklemiyorsa false.
              */
             setBadgeCount: (count) => {
                 if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
                     throw new RangeError('Pushizo: count negatif olmayan tam sayı olmalı.');
                 }
-                return this.bridge.call('setBadgeCount', { count });
+                return this.badge(count);
             },
-            /** Rozeti sıfırlar (yalnızca iOS; Android ve web'de etkisiz). */
-            clearBadge: () => this.bridge.call('setBadgeCount', { count: 0 }),
+            /** Rozeti sıfırlar (`setBadgeCount(0)`); sonuç `setBadgeCount` ile aynıdır. */
+            clearBadge: () => this.badge(0),
+            /**
+             * Güncel rozet sayısı. Android: `setBadgeCount` ile saklanan son sayı; iOS: uygulama simgesindeki rozet; web: bu
+             * oturumda `setBadgeCount` ile başarıyla ayarlanan son sayı (tarayıcı rozeti okutmaz).
+             */
+            getBadgeCount: async () => {
+                var _a;
+                const count = (_a = (await this.bridge.call('getBadgeCount'))) === null || _a === void 0 ? void 0 : _a.count;
+                return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+            },
             /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
             addClickListener: (cb) => {
                 const remove = this.listen(this.clickListeners, cb);
@@ -393,13 +449,24 @@ class PushizoCore {
         };
         // --- Oturum / olaylar ---
         this.Session = {
-            /** Özel olay / outcome; in-app olay tetiklerini de değerlendirir. */
-            sendEvent: (name, properties, value) => {
+            /**
+             * Özel olay / outcome; in-app olay tetiklerini de değerlendirir. `options.eventId` tekilleştirme kimliğidir
+             * (8-64 karakter; harf, rakam ve `. _ : -`): reklam pikseliyle aynı kimlik verilirse sunucu olayı tekilleşir
+             * (ADR-0038). Biçim geçersizse yerel SDK kendi kimliğini üretir.
+             */
+            sendEvent: (name, properties, value, options) => {
                 const args = { name: requireString(name, 'name'), properties: properties !== null && properties !== void 0 ? properties : {} };
                 if (value !== undefined && value !== null) {
                     if (typeof value !== 'number' || !Number.isFinite(value))
                         throw new TypeError('Pushizo: value sayı olmalı.');
                     args.value = value;
+                }
+                const eventId = options === null || options === void 0 ? void 0 : options.eventId;
+                if (eventId !== undefined && eventId !== null) {
+                    if (typeof eventId !== 'string')
+                        throw new TypeError('Pushizo: eventId metin olmalı.');
+                    if (eventId !== '')
+                        args.eventId = eventId;
                 }
                 return this.bridge.call('sendEvent', args);
             },
@@ -446,6 +513,14 @@ class PushizoCore {
             /** Öğeyi kutudan kaldırır (sunucuda arşivlenir). */
             archive: (id) => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
             unreadCount: async () => { var _a; return (_a = (await this.bridge.call('inboxUnreadCount')).unreadCount) !== null && _a !== void 0 ? _a : 0; },
+            /**
+             * Kutu değişim gözlemcisi (rozet güncellemek için): `read`/`read_all`/`archived` her işlemde, `listed`/`count`
+             * yalnızca okunmamış sayısı değiştiğinde bildirilir. Dönen fonksiyon aboneliği kaldırır.
+             */
+            addObserver: (cb) => this.listen(this.inboxObservers, cb),
+            removeObserver: (cb) => {
+                this.inboxObservers.delete(cb);
+            },
         };
         // --- İçerik kartları (ADR-0082) ---
         this.ContentCards = {
@@ -466,7 +541,8 @@ class PushizoCore {
         // --- Canlı sohbet (ADR-0040) ---
         /**
          * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
-         * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.
+         * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir. Hazır
+         * arayüz için `show()` / `hide()`; kendi arayüzünüz için diğer çağrılar ve olaylar.
          */
         this.Chat = {
             /** Sohbeti etkinleştirir ve ziyaretçiyi bağlar (giriş yapmış kullanıcı, push aboneliği); konuşma varsa döner. */
@@ -552,10 +628,23 @@ class PushizoCore {
             stopListening: () => this.bridge.call('chatStopListening'),
             /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
             attachmentUrl: async (attachmentId, download = false) => (await this.bridge.call('chatAttachmentUrl', { attachmentId: requireString(attachmentId, 'attachmentId'), download })).url,
-            /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). Web'de her zaman false. */
+            /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). */
             isListening: async () => { var _a; return Boolean((_a = (await this.bridge.call('chatIsListening'))) === null || _a === void 0 ? void 0 : _a.listening); },
             /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
             getVisitorId: async () => { var _a; return (_a = (await this.bridge.call('chatGetVisitorId')).visitorId) !== null && _a !== void 0 ? _a : null; },
+            /**
+             * Hazır sohbet ekranını açar (Android `HsChatActivity`, iOS `HSChatViewController` modal; web: Web SDK sohbet
+             * widget'ı açık pencereyle). Ekran zaten açıksa yenisi açılmaz. `initialize` öncesinde `NOT_READY` ile reddedilir.
+             */
+            show: async () => {
+                await this.bridge.call('chatShow');
+            },
+            /** `show` ile açılan sohbet ekranını kapatır (açık değilse hiçbir şey yapmaz). */
+            hide: async () => {
+                await this.bridge.call('chatHide');
+            },
+            /** `show` ile açılan sohbet ekranı şu an açık mı. */
+            isPresented: async () => { var _a; return Boolean((_a = (await this.bridge.call('chatIsPresented'))) === null || _a === void 0 ? void 0 : _a.presented); },
             /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
             addEventListener: (event, listener) => {
                 const set = this.chatListeners[event];
@@ -594,6 +683,14 @@ class PushizoCore {
                 });
                 const value = result === null || result === void 0 ? void 0 : result.value;
                 return value === undefined || value === null ? defaultValue : value;
+            },
+            /**
+             * Bayrak değerleri sunucudan her yenilendiğinde (oturum başı ve `refresh()`) çağrılır; güncel değerler `isEnabled` /
+             * `getValue` ile okunur. Dönen fonksiyon aboneliği kaldırır.
+             */
+            addObserver: (cb) => this.listen(this.featureFlagObservers, cb),
+            removeObserver: (cb) => {
+                this.featureFlagObservers.delete(cb);
             },
         };
         // --- Gömülü yerleşimler (ADR-0068) ---
@@ -648,7 +745,10 @@ class PushizoCore {
                     args.rationale = rationale;
                 return Boolean((await this.bridge.call('requestLocationPermission', args)).permission);
             },
-            /** Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"). Web'de false. */
+            /**
+             * Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"; web: tarayıcı konum
+             * izninin son bilinen durumu). İstem açmaz.
+             */
             permissionGranted: async () => { var _a; return Boolean((_a = (await this.bridge.call('getLocationPermission'))) === null || _a === void 0 ? void 0 : _a.permission); },
             /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
             backgroundPermissionGranted: async () => { var _a; return Boolean((_a = (await this.bridge.call('getLocationPermission'))) === null || _a === void 0 ? void 0 : _a.background); },
@@ -836,6 +936,24 @@ class PushizoCore {
             case 'chatOpen':
                 this.onChatOpen((payload !== null && payload !== void 0 ? payload : {}));
                 break;
+            case 'featureFlagsChange':
+                this.featureFlagObservers.forEach((l) => safeInvoke(l, undefined));
+                break;
+            case 'inboxChange': {
+                const raw = (payload !== null && payload !== void 0 ? payload : {});
+                const type = INBOX_CHANGE_TYPES.find((t) => t === raw.type);
+                if (!type)
+                    return;
+                const event = {
+                    type,
+                    unreadCount: typeof raw.unreadCount === 'number' && Number.isFinite(raw.unreadCount) ? raw.unreadCount : 0,
+                };
+                // `itemId` yalnızca tek öğe olaylarında (`read`, `archived`) bulunur; Android `null` gönderir, iOS alanı göndermez.
+                if (typeof raw.itemId === 'string' && raw.itemId !== '')
+                    event.itemId = raw.itemId;
+                this.inboxObservers.forEach((l) => safeInvoke(l, event));
+                break;
+            }
             default:
                 break;
         }
@@ -947,6 +1065,11 @@ class PushizoCore {
     /** Kullanıcıyı anonim kullanıcıya döndürür; kimlik JWT'si cihazdan silinir. */
     logout() {
         return this.bridge.call('logout');
+    }
+    /** Rozet çağrısı; yanıt vermeyen (eski) native katman başarılı sayılır. */
+    async badge(count) {
+        var _a;
+        return ((_a = (await this.bridge.call('setBadgeCount', { count }))) === null || _a === void 0 ? void 0 : _a.success) !== false;
     }
     cardEvent(id, event) {
         return this.bridge.call('contentCardEvent', { id: requireString(id, 'id'), event });

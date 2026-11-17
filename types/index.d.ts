@@ -13,6 +13,8 @@ declare namespace Pushizo {
   type InitializeOptions = Definitions.InitializeOptions;
   type LoginOptions = Definitions.LoginOptions;
   type UserProfile = Definitions.UserProfile;
+  type UserPropertyValue = Definitions.UserPropertyValue;
+  type SendEventOptions = Definitions.SendEventOptions;
   type PushizoNotification = Definitions.PushizoNotification;
   type NotificationClickEvent = Definitions.NotificationClickEvent;
   type ForegroundWillDisplayEvent = Definitions.ForegroundWillDisplayEvent;
@@ -36,6 +38,7 @@ declare namespace Pushizo {
   type InboxItem = Definitions.InboxItem;
   type InboxPage = Definitions.InboxPage;
   type InboxListOptions = Definitions.InboxListOptions;
+  type InboxChangeEvent = Definitions.InboxChangeEvent;
   type ContentCard = Definitions.ContentCard;
   type ContentCardFeed = Definitions.ContentCardFeed;
   type ContentCardType = Definitions.ContentCardType;

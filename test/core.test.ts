@@ -714,4 +714,148 @@ describe('PushizoCore', () => {
       ['isGeofencingEnabled', undefined],
     ]);
   });
+
+  it('User.setProperty: anahtar ve değer doğrulanır; null özelliği siler', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    await hs.User.setProperty('plan', 'pro');
+    await hs.User.setProperty(' level ', 3);
+    await hs.User.setProperty('vip', false);
+    await hs.User.setProperty('interests', ['spor', 'müzik']);
+    await hs.User.setProperty('address', { city: 'İzmir', geo: { lat: 38.4, lng: 27.1 }, tags: [1, 2] });
+    await hs.User.setProperty('plan', null);
+    await hs.User.setProperty('plan', undefined as never);
+    expect(f.calls.map((c) => c.args)).toEqual([
+      { key: 'plan', value: 'pro' },
+      { key: 'level', value: 3 },
+      { key: 'vip', value: false },
+      { key: 'interests', value: ['spor', 'müzik'] },
+      { key: 'address', value: { city: 'İzmir', geo: { lat: 38.4, lng: 27.1 }, tags: [1, 2] } },
+      { key: 'plan', value: null },
+      { key: 'plan', value: null },
+    ]);
+    expect(f.calls.every((c) => c.method === 'setUserProperty')).toBe(true);
+    expect(() => hs.User.setProperty('', 'x')).toThrow(/key/);
+    expect(() => hs.User.setProperty('   ', 'x')).toThrow(TypeError);
+    expect(() => hs.User.setProperty('k'.repeat(65), 'x')).toThrow(RangeError);
+    expect(() => hs.User.setProperty('n', Number.NaN)).toThrow(/sonlu/);
+    expect(() => hs.User.setProperty('d', new Date() as never)).toThrow(/value/);
+    expect(() => hs.User.setProperty('f', (() => 1) as never)).toThrow(TypeError);
+    expect(() => hs.User.setProperty('a', ['x', null] as never)).toThrow(/value\[1\] null olamaz/);
+    expect(() => hs.User.setProperty('o', { in: { x: undefined } } as never)).toThrow(/value\.in\.x null olamaz/);
+    expect(f.calls).toHaveLength(7);
+  });
+
+  it('Session.sendEvent: eventId yalnızca verildiğinde gönderilir; metin olmayan kimlik reddedilir', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    await hs.Session.sendEvent('purchase', { sku: 'A1' }, 49.9, { eventId: 'order_42:purchase' });
+    await hs.Session.sendEvent('view', undefined, undefined, { eventId: 'evt-12345678' });
+    await hs.Session.sendEvent('view', {}, undefined, {});
+    await hs.Session.sendEvent('view', {}, undefined, { eventId: '' });
+    expect(f.calls.map((c) => c.args)).toEqual([
+      { name: 'purchase', properties: { sku: 'A1' }, value: 49.9, eventId: 'order_42:purchase' },
+      { name: 'view', properties: {}, eventId: 'evt-12345678' },
+      { name: 'view', properties: {} },
+      { name: 'view', properties: {} },
+    ]);
+    expect(() => hs.Session.sendEvent('view', {}, undefined, { eventId: 42 as never })).toThrow(/eventId/);
+    expect(f.calls).toHaveLength(4);
+  });
+
+  it('rozet: native başarı bilgisi döner (yanıt yoksa true); getBadgeCount negatif ve eksik yanıtı 0 sayar', async () => {
+    const supported = new PushizoCore(fakeBridge({ setBadgeCount: { success: true }, getBadgeCount: { count: 7 } }).bridge);
+    expect(await supported.Notifications.setBadgeCount(7)).toBe(true);
+    expect(await supported.Notifications.clearBadge()).toBe(true);
+    expect(await supported.Notifications.getBadgeCount()).toBe(7);
+
+    const unsupported = fakeBridge({ setBadgeCount: { success: false }, getBadgeCount: { count: -3 } });
+    const hs = new PushizoCore(unsupported.bridge);
+    expect(await hs.Notifications.setBadgeCount(2)).toBe(false);
+    expect(await hs.Notifications.clearBadge()).toBe(false);
+    expect(await hs.Notifications.getBadgeCount()).toBe(0);
+    expect(unsupported.calls).toEqual([
+      { method: 'setBadgeCount', args: { count: 2 } },
+      { method: 'setBadgeCount', args: { count: 0 } },
+      { method: 'getBadgeCount', args: undefined },
+    ]);
+
+    // Eski native katman (yanıt gövdesi yok): çağrı başarılı sayılır, sayı 0.
+    const legacy = new PushizoCore(fakeBridge().bridge);
+    expect(await legacy.Notifications.setBadgeCount(1)).toBe(true);
+    expect(await legacy.Notifications.getBadgeCount()).toBe(0);
+  });
+
+  it('FeatureFlags gözlemcisi: yenileme olayı gözlemcilere gider; kaldırılan gözlemci çağrılmaz', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    const first = vi.fn();
+    const second = vi.fn();
+    const remove = hs.FeatureFlags.addObserver(first);
+    hs.FeatureFlags.addObserver(second);
+    hs.FeatureFlags.addObserver(() => {
+      throw new Error('gözlemci hatası');
+    });
+    await Promise.resolve();
+    expect(f.subscribe).toHaveBeenCalledTimes(1);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    f.emit('featureFlagsChange', {});
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    remove();
+    hs.FeatureFlags.removeObserver(second);
+    f.emit('featureFlagsChange', undefined);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    errors.mockRestore();
+    expect(() => hs.FeatureFlags.addObserver('x' as never)).toThrow(TypeError);
+  });
+
+  it('Inbox gözlemcisi: olay normalize edilir (itemId yalnızca doluysa), bilinmeyen tür atlanır', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    const events: unknown[] = [];
+    const observer = (e: unknown) => events.push(e);
+    const remove = hs.Inbox.addObserver(observer);
+    await Promise.resolve();
+
+    f.emit('inboxChange', { type: 'read', itemId: 'inb_1', unreadCount: 2 });
+    // Android tek öğe olayı dışındaki olaylarda `itemId: null` gönderir; iOS alanı göndermez.
+    f.emit('inboxChange', { type: 'read_all', itemId: null, unreadCount: 0 });
+    f.emit('inboxChange', { type: 'listed', unreadCount: 5 });
+    f.emit('inboxChange', { type: 'archived', itemId: 'inb_2', unreadCount: 4 });
+    f.emit('inboxChange', { type: 'count' });
+    f.emit('inboxChange', { type: 'bilinmeyen', unreadCount: 9 });
+    f.emit('inboxChange', null);
+    expect(events).toEqual([
+      { type: 'read', itemId: 'inb_1', unreadCount: 2 },
+      { type: 'read_all', unreadCount: 0 },
+      { type: 'listed', unreadCount: 5 },
+      { type: 'archived', itemId: 'inb_2', unreadCount: 4 },
+      { type: 'count', unreadCount: 0 },
+    ]);
+
+    remove();
+    f.emit('inboxChange', { type: 'count', unreadCount: 1 });
+    expect(events).toHaveLength(5);
+    hs.Inbox.addObserver(observer);
+    hs.Inbox.removeObserver(observer);
+    f.emit('inboxChange', { type: 'count', unreadCount: 1 });
+    expect(events).toHaveLength(5);
+  });
+
+  it('Chat.show / hide / isPresented: hazır sohbet ekranı çağrıları köprüye gider; eksik yanıt false', async () => {
+    const f = fakeBridge({ chatIsPresented: { presented: true }, chatHide: { hidden: true } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Chat.show()).toBeUndefined();
+    expect(await hs.Chat.isPresented()).toBe(true);
+    expect(await hs.Chat.hide()).toBeUndefined();
+    expect(f.calls.map((c) => c.method)).toEqual(['chatShow', 'chatIsPresented', 'chatHide']);
+    expect(await new PushizoCore(fakeBridge().bridge).Chat.isPresented()).toBe(false);
+
+    const error = Object.assign(new Error('Önce Pushizo.initialize çağrılmalı'), { code: 'NOT_READY' });
+    const bridge: Bridge = { call: vi.fn(async () => Promise.reject(error)), subscribe: vi.fn() };
+    await expect(new PushizoCore(bridge).Chat.show()).rejects.toMatchObject({ code: 'NOT_READY' });
+  });
 });

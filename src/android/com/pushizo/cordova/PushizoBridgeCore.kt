@@ -3,12 +3,15 @@ package com.pushizo.cordova
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import com.pushizo.sdk.Pushizo
 import com.pushizo.sdk.HsApiException
 import com.pushizo.sdk.HsCallback
+import com.pushizo.sdk.HsChatActivity
 import com.pushizo.sdk.HsChatEventAdapter
 import com.pushizo.sdk.HsChatOpenListener
 import com.pushizo.sdk.HsClickEvent
@@ -27,7 +30,9 @@ import com.pushizo.sdk.HsContentCard
 import com.pushizo.sdk.HsContentCardFeed
 import com.pushizo.sdk.HsDeliverySetting
 import com.pushizo.sdk.HsDeliveryStatus
+import com.pushizo.sdk.HsFeatureFlagObserver
 import com.pushizo.sdk.HsInboxItem
+import com.pushizo.sdk.HsInboxObserver
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsMessageCategory
@@ -39,6 +44,8 @@ import com.pushizo.sdk.HsPushSubscriptionState
 import com.pushizo.sdk.HsUserProfile
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -108,6 +115,39 @@ internal class PushizoBridgeCore(
     /** Sohbet bildirimine tıklama → JS `chatOpen` (cephe dinleyici yoksa bekletir). */
     private val chatOpenListener = HsChatOpenListener { info -> emit("chatOpen", JSONObject(info.toMap())) }
 
+    /** Özellik bayrakları sunucudan yenilendi → JS `featureFlagsChange` (yerel SDK ana iş parçacığında çağırır). */
+    private val featureFlagObserver = HsFeatureFlagObserver { emit("featureFlagsChange", JSONObject()) }
+
+    /** Bildirim kutusu değişti → JS `inboxChange` (`{ type, itemId, unreadCount }`; `itemId` tek öğe olayları dışında null). */
+    private val inboxObserver = HsInboxObserver { event -> emit("inboxChange", JSONObject(event.toMap())) }
+
+    /**
+     * Açık hazır sohbet ekranları. Yerel SDK ekranın açık olup olmadığını dışa açmadığından (`Chat.hide()` yalnızca
+     * kapatır) köprü `HsChatActivity` yaşam döngüsünü izler; kayıtlar zayıf tutulur.
+     */
+    private val chatScreens: MutableSet<Activity> = Collections.newSetFromMap(WeakHashMap())
+
+    private val chatScreenTracker = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+            if (activity is HsChatActivity) synchronized(chatScreens) { chatScreens.add(activity) }
+        }
+        override fun onActivityDestroyed(activity: Activity) {
+            if (activity is HsChatActivity) synchronized(chatScreens) { chatScreens.remove(activity) }
+        }
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+    }
+
+    init {
+        (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(chatScreenTracker)
+    }
+
+    /** `Chat.show()` ile açılan sohbet ekranı açık mı (kapanmakta olan ekran sayılmaz). */
+    private fun isChatPresented(): Boolean = synchronized(chatScreens) { chatScreens.any { !it.isFinishing && !it.isDestroyed } }
+
     private val inAppLifecycleListener = object : HsInAppLifecycleListener {
         private fun send(event: String, e: HsInAppLifecycleEvent) =
             emit("inAppLifecycle", JSONObject().put("event", event).put("message", JSONObject().put("id", e.message.id)))
@@ -133,9 +173,12 @@ internal class PushizoBridgeCore(
         Pushizo.InAppMessages.addLifecycleListener(inAppLifecycleListener)
         Pushizo.Chat.addListener(chatListener)
         Pushizo.Chat.addOpenListener(chatOpenListener)
+        Pushizo.FeatureFlags.addObserver(featureFlagObserver)
+        Pushizo.Inbox.addObserver(inboxObserver)
     }
 
     fun detach() {
+        (context.applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(chatScreenTracker)
         if (!listenersRegistered.compareAndSet(true, false)) return
         Pushizo.Notifications.removeClickListener(clickListener)
         Pushizo.Notifications.removeForegroundLifecycleListener(foregroundListener)
@@ -145,6 +188,8 @@ internal class PushizoBridgeCore(
         Pushizo.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
         Pushizo.Chat.removeListener(chatListener)
         Pushizo.Chat.removeOpenListener(chatOpenListener)
+        Pushizo.FeatureFlags.removeObserver(featureFlagObserver)
+        Pushizo.Inbox.removeObserver(inboxObserver)
         // Bekleyen ön plan bildirimleri kaybolmasın diye gösterilir.
         val pending = synchronized(pendingForeground) { pendingForeground.values.toList().also { pendingForeground.clear() } }
         pending.forEach { it.display() }
@@ -339,6 +384,11 @@ internal class PushizoBridgeCore(
                 "addAliases" -> { Pushizo.User.addAliases(args.stringMap("aliases")); reply.success(null) }
                 "removeAlias" -> { Pushizo.User.removeAlias(args.requireString("label")); reply.success(null) }
                 "setLanguage" -> { Pushizo.User.setLanguage(args.requireString("code")); reply.success(null) }
+                // Kullanıcı özelliği: JSON null özelliği siler; nesne/dizi yerel SDK'da kuyruk JSON'una çevrilir. Boş anahtar → INVALID_ARGUMENT.
+                "setUserProperty" -> {
+                    Pushizo.User.setProperty(args.requireString("key"), args.opt("value")?.takeUnless { it == JSONObject.NULL })
+                    reply.success(null)
+                }
                 // Geçersiz adres → IllegalArgumentException → INVALID_ARGUMENT
                 "addEmail" -> { Pushizo.User.addEmail(args.requireString("email")); reply.success(null) }
                 "removeEmail" -> { Pushizo.User.removeEmail(args.requireString("email")); reply.success(null) }
@@ -376,8 +426,9 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "removeGroupedNotifications" -> { Pushizo.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }
-                // Uygulama rozeti iOS'a özgüdür; Android'de rozet görünen bildirimlerden hesaplanır: etkisiz, hata yok.
-                "setBadgeCount" -> reply.success(null)
+                // Rozet: yerel SDK sayıyı saklar ve sonraki bildirimlere yazar; `success` rozetin bu cihazda gösterilebildiğini bildirir.
+                "setBadgeCount" -> reply.success(JSONObject().put("success", Pushizo.Notifications.setBadgeCount(args.optInt("count", 0))))
+                "getBadgeCount" -> reply.success(JSONObject().put("count", Pushizo.Notifications.badgeCount))
                 "setForegroundHandlerEnabled" -> { foregroundHandlerEnabled = args.optBoolean("enabled", false); reply.success(null) }
                 "displayNotification" -> {
                     val id = args.requireString("notificationId")
@@ -392,7 +443,11 @@ internal class PushizoBridgeCore(
 
                 "sendEvent" -> {
                     val value = if (args.has("value") && !args.isNull("value")) args.getDouble("value") else null
-                    Pushizo.Session.sendEvent(args.requireString("name"), args.optJSONObject("properties")?.toMap() ?: emptyMap(), value)
+                    val name = args.requireString("name")
+                    val properties = args.optJSONObject("properties")?.toMap() ?: emptyMap()
+                    // Tekilleştirme kimliği (isteğe bağlı): biçim geçersizse yerel SDK kendi kimliğini üretir.
+                    val eventId = args.optStringOrNull("eventId")
+                    if (eventId == null) Pushizo.Session.sendEvent(name, properties, value) else Pushizo.Session.sendEvent(name, properties, value, eventId)
                     reply.success(null)
                 }
                 "setLogLevel" -> { Pushizo.Debug.setLogLevel(logLevel(args.optStringOrNull("level"))); reply.success(null) }
@@ -510,6 +565,14 @@ internal class PushizoBridgeCore(
                 )
                 "chatGetVisitorId" -> reply.success(JSONObject().put("visitorId", Pushizo.Chat.visitorId.orNull()))
                 "chatIsListening" -> reply.success(JSONObject().put("listening", Pushizo.Chat.isListening))
+                // Hazır sohbet ekranı (`HsChatActivity`): etkin Activity varsa onun üzerinden, yoksa uygulama bağlamıyla açılır.
+                "chatShow" -> {
+                    check(Pushizo.isInitialized) { NOT_INITIALIZED }
+                    Pushizo.Chat.show(activityProvider?.invoke() ?: context)
+                    reply.success(null)
+                }
+                "chatHide" -> { Pushizo.Chat.hide(); reply.success(null) }
+                "chatIsPresented" -> reply.success(JSONObject().put("presented", isChatPresented()))
                 else -> return false
             }
         } catch (e: IllegalArgumentException) {
