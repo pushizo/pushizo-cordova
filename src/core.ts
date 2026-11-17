@@ -45,7 +45,9 @@ import type {
   PushSubscriptionState,
   RawForegroundEvent,
   RawInAppLifecycleEvent,
+  UserConsent,
   UserPreferences,
+  UserProfile,
 } from './definitions';
 
 /** Native katmandan gelen olay adları. */
@@ -188,6 +190,43 @@ function preferenceArgs(input: PreferenceInput[]): PreferenceArg[] {
     if (typeof p.optedIn !== 'boolean') throw new TypeError(`Pushizo: preferences[${i}].optedIn boolean olmalı.`);
     return { category, channel, optedIn: p.optedIn };
   });
+}
+
+/** `login` profilini doğrular; etiket değerleri metne çevrilir, boş alanlar köprüye gönderilmez. */
+function profileArgs(input: UserProfile): Record<string, unknown> {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('Pushizo: profile bir nesne olmalı.');
+  }
+  const out: Record<string, unknown> = {};
+  if (input.email !== undefined && input.email !== null) out.email = requireString(input.email, 'profile.email');
+  if (input.sms !== undefined && input.sms !== null) out.sms = requireString(input.sms, 'profile.sms');
+  if (input.tags !== undefined && input.tags !== null) {
+    const tags = stringRecord(input.tags, 'profile.tags');
+    if (Object.keys(tags).length > 0) out.tags = tags;
+  }
+  if (input.aliases !== undefined && input.aliases !== null) {
+    const aliases = stringRecord(input.aliases, 'profile.aliases');
+    if (Object.keys(aliases).length > 0) out.aliases = aliases;
+  }
+  return out;
+}
+
+/** Native rıza listesini eksik alanlara karşı normalize eder (`updatedAt` epoch milisaniye). */
+function normalizeConsents(raw: unknown): UserConsent[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UserConsent[] = [];
+  for (const item of raw as unknown[]) {
+    if (item === null || typeof item !== 'object') continue;
+    const c = item as Record<string, unknown>;
+    if (typeof c.purpose !== 'string' || c.purpose === '') continue;
+    out.push({
+      purpose: c.purpose,
+      granted: c.granted === true,
+      source: typeof c.source === 'string' ? c.source : null,
+      updatedAt: typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt) ? c.updatedAt : null,
+    });
+  }
+  return out;
 }
 
 function textMap(value: unknown): Record<string, string> {
@@ -464,6 +503,10 @@ export class PushizoCore {
     }
   }
 
+  /** Native SDK başlatıldı mı (`initialize` tamamlandı ya da süreç saklanan yapılandırmayla erkenden başlatıldı). */
+  isInitialized = async (): Promise<boolean> =>
+    Boolean((await this.bridge.call<{ initialized: boolean } | undefined>('isInitialized'))?.initialized);
+
   /** KVKK/GDPR onayı (`requiresPrivacyConsent: true` ile başlatıldıysa). */
   setConsentGiven(given: boolean): Promise<void> {
     return this.bridge.call('setConsentGiven', { given: Boolean(given) });
@@ -471,14 +514,17 @@ export class PushizoCore {
 
   /**
    * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
-   * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+   * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`. `profile` verilirse e-posta, SMS,
+   * etiket ve takma adlar aynı çağrıda ayarlanır: `login(id, { profile: { email: 'ali@ornek.com' } })`; geçersiz
+   * e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir (yarım kalmış kimlik değişimi olmaz).
    */
   login(externalId: string, proof?: string | LoginOptions): Promise<void> {
     requireString(externalId, 'externalId');
-    const { identityHash, jwt }: LoginOptions = typeof proof === 'string' ? { identityHash: proof } : (proof ?? {});
+    const { identityHash, jwt, profile }: LoginOptions = typeof proof === 'string' ? { identityHash: proof } : (proof ?? {});
     const args: Record<string, unknown> = { externalId };
     if (identityHash !== undefined && identityHash !== null) args.identityHash = requireString(identityHash, 'identityHash');
     if (jwt !== undefined && jwt !== null) args.jwt = requireString(jwt, 'jwt');
+    if (profile !== undefined && profile !== null) args.profile = profileArgs(profile);
     return this.bridge.call('login', args);
   }
 
@@ -533,6 +579,22 @@ export class PushizoCore {
     /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
     setPreferences: async (preferences: PreferenceInput[]): Promise<UserPreferences> =>
       normalizePreferences(await this.bridge.call<RawPreferences>('setPreferences', { preferences: preferenceArgs(preferences) })),
+    /**
+     * Reklam kişiselleştirme rızası (ADR-0037): `true` iken kullanıcının e-posta/telefon özeti app'in bağladığı reklam
+     * platformu kitlelerine gönderilebilir; `false` rızayı geri alır. Güncel tercih listesini döndürür.
+     */
+    setAdsPersonalizationConsent: async (granted: boolean): Promise<UserPreferences> => {
+      if (typeof granted !== 'boolean') throw new TypeError('Pushizo: granted boolean olmalı.');
+      return normalizePreferences(await this.bridge.call<RawPreferences>('setAdsPersonalizationConsent', { granted }));
+    },
+    /** Rıza kayıtları (`ads_personalization` …). Abonelik henüz yoksa `NOT_READY` koduyla reddedilir. */
+    getConsents: async (): Promise<UserConsent[]> =>
+      normalizeConsents((await this.bridge.call<{ consents?: unknown } | undefined>('getConsents'))?.consents),
+    /**
+     * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). ADM kaydını kendisi yapan
+     * uygulamalar içindir. iOS ve web'de etkisizdir.
+     */
+    registerAdm: (token: string): Promise<void> => this.bridge.call('registerAdm', { token: requireString(token, 'token') }),
     pushSubscription: {
       getState: (): Promise<PushSubscriptionState> => this.bridge.call<PushSubscriptionState>('getPushSubscription'),
       getId: async (): Promise<string | null> =>
@@ -574,6 +636,18 @@ export class PushizoCore {
     /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
     removeGroupedNotifications: (group: string): Promise<void> =>
       this.bridge.call('removeGroupedNotifications', { group: requireString(group, 'group') }),
+    /**
+     * Uygulama rozetini ayarlar (yalnızca iOS; bildirim uzantısıyla paylaşılan sayaç da eşitlenir). Android'de rozet
+     * görünen bildirimlerden hesaplandığından ve web'de karşılığı olmadığından etkisizdir.
+     */
+    setBadgeCount: (count: number): Promise<void> => {
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+        throw new RangeError('Pushizo: count negatif olmayan tam sayı olmalı.');
+      }
+      return this.bridge.call('setBadgeCount', { count });
+    },
+    /** Rozeti sıfırlar (yalnızca iOS; Android ve web'de etkisiz). */
+    clearBadge: (): Promise<void> => this.bridge.call('setBadgeCount', { count: 0 }),
     /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
     addClickListener: (cb: Listener<NotificationClickEvent>): (() => void) => {
       const remove = this.listen(this.clickListeners, cb);
@@ -777,6 +851,9 @@ export class PushizoCore {
     /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
     attachmentUrl: async (attachmentId: string, download = false): Promise<string> =>
       (await this.bridge.call<{ url: string }>('chatAttachmentUrl', { attachmentId: requireString(attachmentId, 'attachmentId'), download })).url,
+    /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). Web'de her zaman false. */
+    isListening: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ listening: boolean } | undefined>('chatIsListening'))?.listening),
     /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
     getVisitorId: async (): Promise<string | null> =>
       (await this.bridge.call<{ visitorId: string | null }>('chatGetVisitorId')).visitorId ?? null,
@@ -922,16 +999,59 @@ export class PushizoCore {
       if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
       return Boolean((await this.bridge.call<{ permission: boolean }>('requestLocationPermission', args)).permission);
     },
+    /** Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"). Web'de false. */
+    permissionGranted: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ permission: boolean } | undefined>('getLocationPermission'))?.permission),
+    /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
+    backgroundPermissionGranted: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ background: boolean } | undefined>('getLocationPermission'))?.background),
+    /**
+     * Arka plan konum iznini ister (bölge izleme için). Android: açıklama diyaloğu (`rationale`; verilmezse SDK metni),
+     * ardından `ACCESS_BACKGROUND_LOCATION` (Android 11+ sistem Ayarlar ekranını açar; önce ön plan konum izni verilmiş
+     * olmalı). iOS: "her zaman" izni (`rationale` yok sayılır; önce "kullanırken" izni verilmiş olmalı). Sonuç: izin
+     * varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false. Web'de false.
+     */
+    requestBackgroundPermission: async (rationale?: string): Promise<boolean> => {
+      if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+        throw new TypeError('Pushizo: rationale metin olmalı.');
+      }
+      const args: Record<string, unknown> = {};
+      if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
+      const result = await this.bridge.call<{ permission: boolean } | undefined>('requestBackgroundLocationPermission', args);
+      return Boolean(result?.permission);
+    },
+    /** `requestBackgroundPermission` ile aynı izin (iOS adı: "her zaman"); iki ad da her platformda çalışır. */
+    requestAlwaysPermission: async (): Promise<boolean> =>
+      Boolean(
+        (await this.bridge.call<{ permission: boolean } | undefined>('requestBackgroundLocationPermission', {}))?.permission,
+      ),
     /**
      * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
-     * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir; köprü izin istemez ve
-     * manifest/Info.plist'e izin eklemez.
+     * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir (`requestBackgroundPermission`);
+     * köprü manifest/Info.plist'e izin eklemez.
      */
     setGeofencingEnabled: (enabled: boolean): Promise<void> =>
       this.bridge.call('setGeofencingEnabled', { enabled: Boolean(enabled) }),
     /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
     isGeofencingEnabled: async (): Promise<boolean> =>
       Boolean((await this.bridge.call<{ enabled: boolean } | undefined>('isGeofencingEnabled'))?.enabled),
+  };
+
+  // --- Reklam kimliği (ADR-0037) ---
+
+  /**
+   * Mobil reklam kimliği (Android GAID, iOS IDFA). SDK reklam kitaplığı ve izin istemi içermez: kimliği uygulama alır
+   * (Android `AdvertisingIdClient`, iOS App Tracking Transparency izninden sonra `ASIdentifierManager`) ve buraya verir.
+   * Kimlik reklam kitlesine yalnızca `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle gider.
+   */
+  readonly Ads = {
+    /** Reklam kimliğini yazar; `null` veya sıfır kimlik sunucudaki kaydı siler. Web'de etkisizdir. */
+    setAdvertisingId: (id: string | null): Promise<void> => {
+      if (id !== null && id !== undefined && typeof id !== 'string') {
+        throw new TypeError('Pushizo: id metin veya null olmalı.');
+      }
+      return this.bridge.call('setAdvertisingId', { id: typeof id === 'string' && id.trim() !== '' ? id : null });
+    },
   };
 
   // --- Android teslimat güçlendirme (ADR-0092) ---

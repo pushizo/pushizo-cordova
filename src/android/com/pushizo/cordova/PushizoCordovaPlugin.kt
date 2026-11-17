@@ -21,6 +21,7 @@ class PushizoCordovaPlugin : CordovaPlugin() {
     private val bufferedEvents = ArrayDeque<JSONObject>()
     private var pendingPermission: CallbackContext? = null
     private var pendingLocationPermission: CallbackContext? = null
+    private var pendingBackgroundLocationPermission: CallbackContext? = null
 
     override fun pluginInitialize() {
         core = PushizoBridgeCore(cordova.activity.applicationContext) { type, payload -> sendEvent(type, payload) }
@@ -33,6 +34,7 @@ class PushizoCordovaPlugin : CordovaPlugin() {
             "setEventCallback" -> openEventChannel(callbackContext)
             "requestPermission" -> requestPermission(callbackContext)
             "requestLocationPermission" -> requestLocationPermission(args.optJSONObject(0) ?: JSONObject(), callbackContext)
+            "requestBackgroundLocationPermission" -> requestBackgroundLocationPermission(args.optJSONObject(0) ?: JSONObject(), callbackContext)
             else -> return core.handle(action, args.optJSONObject(0) ?: JSONObject(), reply(callbackContext))
         }
         return true
@@ -104,6 +106,19 @@ class PushizoCordovaPlugin : CordovaPlugin() {
         }
     }
 
+    /**
+     * Arka plan konum izni (ADR-0065): açıklama diyaloğu ve manifest denetimi [PushizoBridgeCore] içindedir; "Devam"
+     * seçilirse sistem izni [BACKGROUND_LOCATION_REQUEST_CODE] ile istenir, sonuç [onRequestPermissionsResult] ile döner.
+     */
+    private fun requestBackgroundLocationPermission(args: JSONObject, callbackContext: CallbackContext) {
+        core.requestBackgroundLocationPermission(cordova.activity, args, reply(callbackContext)) { permissions ->
+            // Yanıtsız kalan önceki istek güncel izin durumuyla kapatılır.
+            val previous = synchronized(lock) { pendingBackgroundLocationPermission.also { pendingBackgroundLocationPermission = callbackContext } }
+            previous?.success(core.backgroundLocationPermissionJson())
+            cordova.requestPermissions(this, BACKGROUND_LOCATION_REQUEST_CODE, permissions)
+        }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         when (requestCode) {
             PERMISSION_REQUEST_CODE -> {
@@ -116,6 +131,11 @@ class PushizoCordovaPlugin : CordovaPlugin() {
                 // SDK bilgilendirilir (izin verildiyse ve paylaşım açıksa konum gönderilir); sonuç sistem durumundan okunur.
                 val result = core.onLocationPermissionResult()
                 val callback = synchronized(lock) { pendingLocationPermission.also { pendingLocationPermission = null } } ?: return
+                callback.success(result)
+            }
+            BACKGROUND_LOCATION_REQUEST_CODE -> {
+                val result = core.onBackgroundLocationPermissionResult()
+                val callback = synchronized(lock) { pendingBackgroundLocationPermission.also { pendingBackgroundLocationPermission = null } } ?: return
                 callback.success(result)
             }
         }
@@ -137,6 +157,7 @@ class PushizoCordovaPlugin : CordovaPlugin() {
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 0x4854
+        private const val BACKGROUND_LOCATION_REQUEST_CODE = 0x4855
         private const val MAX_BUFFERED_EVENTS = 50
     }
 }

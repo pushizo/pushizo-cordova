@@ -169,4 +169,13 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(chatAttachmentUrl:) func chatAttachmentUrl(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetVisitorId:) func chatGetVisitorId(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(requestLocationPermission:) func requestLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(isInitialized:) func isInitialized(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setAdsPersonalizationConsent:) func setAdsPersonalizationConsent(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getConsents:) func getConsents(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(registerAdm:) func registerAdm(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setAdvertisingId:) func setAdvertisingId(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setBadgeCount:) func setBadgeCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getLocationPermission:) func getLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(requestBackgroundLocationPermission:) func requestBackgroundLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatIsListening:) func chatIsListening(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

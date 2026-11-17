@@ -109,6 +109,48 @@ function preferenceArgs(input) {
         return { category, channel, optedIn: p.optedIn };
     });
 }
+/** `login` profilini doğrular; etiket değerleri metne çevrilir, boş alanlar köprüye gönderilmez. */
+function profileArgs(input) {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+        throw new TypeError('Pushizo: profile bir nesne olmalı.');
+    }
+    const out = {};
+    if (input.email !== undefined && input.email !== null)
+        out.email = requireString(input.email, 'profile.email');
+    if (input.sms !== undefined && input.sms !== null)
+        out.sms = requireString(input.sms, 'profile.sms');
+    if (input.tags !== undefined && input.tags !== null) {
+        const tags = stringRecord(input.tags, 'profile.tags');
+        if (Object.keys(tags).length > 0)
+            out.tags = tags;
+    }
+    if (input.aliases !== undefined && input.aliases !== null) {
+        const aliases = stringRecord(input.aliases, 'profile.aliases');
+        if (Object.keys(aliases).length > 0)
+            out.aliases = aliases;
+    }
+    return out;
+}
+/** Native rıza listesini eksik alanlara karşı normalize eder (`updatedAt` epoch milisaniye). */
+function normalizeConsents(raw) {
+    if (!Array.isArray(raw))
+        return [];
+    const out = [];
+    for (const item of raw) {
+        if (item === null || typeof item !== 'object')
+            continue;
+        const c = item;
+        if (typeof c.purpose !== 'string' || c.purpose === '')
+            continue;
+        out.push({
+            purpose: c.purpose,
+            granted: c.granted === true,
+            source: typeof c.source === 'string' ? c.source : null,
+            updatedAt: typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt) ? c.updatedAt : null,
+        });
+    }
+    return out;
+}
 function textMap(value) {
     const out = {};
     if (value === null || typeof value !== 'object' || Array.isArray(value))
@@ -227,6 +269,8 @@ class PushizoCore {
         /** Dinleyici yokken gelen sohbet bildirimi tıklamaları (soğuk başlatma). */
         this.pendingChatOpens = [];
         this.foregroundFlag = false;
+        /** Native SDK başlatıldı mı (`initialize` tamamlandı ya da süreç saklanan yapılandırmayla erkenden başlatıldı). */
+        this.isInitialized = async () => { var _a; return Boolean((_a = (await this.bridge.call('isInitialized'))) === null || _a === void 0 ? void 0 : _a.initialized); };
         // --- Kullanıcı ---
         this.User = {
             addTag: (key, value) => this.bridge.call('addTags', { tags: stringRecord({ [requireString(key, 'key')]: value }, 'tags') }),
@@ -255,6 +299,22 @@ class PushizoCore {
             getPreferences: async () => normalizePreferences(await this.bridge.call('getPreferences')),
             /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
             setPreferences: async (preferences) => normalizePreferences(await this.bridge.call('setPreferences', { preferences: preferenceArgs(preferences) })),
+            /**
+             * Reklam kişiselleştirme rızası (ADR-0037): `true` iken kullanıcının e-posta/telefon özeti app'in bağladığı reklam
+             * platformu kitlelerine gönderilebilir; `false` rızayı geri alır. Güncel tercih listesini döndürür.
+             */
+            setAdsPersonalizationConsent: async (granted) => {
+                if (typeof granted !== 'boolean')
+                    throw new TypeError('Pushizo: granted boolean olmalı.');
+                return normalizePreferences(await this.bridge.call('setAdsPersonalizationConsent', { granted }));
+            },
+            /** Rıza kayıtları (`ads_personalization` …). Abonelik henüz yoksa `NOT_READY` koduyla reddedilir. */
+            getConsents: async () => { var _a; return normalizeConsents((_a = (await this.bridge.call('getConsents'))) === null || _a === void 0 ? void 0 : _a.consents); },
+            /**
+             * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). ADM kaydını kendisi yapan
+             * uygulamalar içindir. iOS ve web'de etkisizdir.
+             */
+            registerAdm: (token) => this.bridge.call('registerAdm', { token: requireString(token, 'token') }),
             pushSubscription: {
                 getState: () => this.bridge.call('getPushSubscription'),
                 getId: async () => { var _a; return (_a = (await this.bridge.call('getPushSubscription')).id) !== null && _a !== void 0 ? _a : null; },
@@ -290,6 +350,18 @@ class PushizoCore {
             },
             /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
             removeGroupedNotifications: (group) => this.bridge.call('removeGroupedNotifications', { group: requireString(group, 'group') }),
+            /**
+             * Uygulama rozetini ayarlar (yalnızca iOS; bildirim uzantısıyla paylaşılan sayaç da eşitlenir). Android'de rozet
+             * görünen bildirimlerden hesaplandığından ve web'de karşılığı olmadığından etkisizdir.
+             */
+            setBadgeCount: (count) => {
+                if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+                    throw new RangeError('Pushizo: count negatif olmayan tam sayı olmalı.');
+                }
+                return this.bridge.call('setBadgeCount', { count });
+            },
+            /** Rozeti sıfırlar (yalnızca iOS; Android ve web'de etkisiz). */
+            clearBadge: () => this.bridge.call('setBadgeCount', { count: 0 }),
             /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
             addClickListener: (cb) => {
                 const remove = this.listen(this.clickListeners, cb);
@@ -480,6 +552,8 @@ class PushizoCore {
             stopListening: () => this.bridge.call('chatStopListening'),
             /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
             attachmentUrl: async (attachmentId, download = false) => (await this.bridge.call('chatAttachmentUrl', { attachmentId: requireString(attachmentId, 'attachmentId'), download })).url,
+            /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). Web'de her zaman false. */
+            isListening: async () => { var _a; return Boolean((_a = (await this.bridge.call('chatIsListening'))) === null || _a === void 0 ? void 0 : _a.listening); },
             /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
             getVisitorId: async () => { var _a; return (_a = (await this.bridge.call('chatGetVisitorId')).visitorId) !== null && _a !== void 0 ? _a : null; },
             /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
@@ -574,14 +648,54 @@ class PushizoCore {
                     args.rationale = rationale;
                 return Boolean((await this.bridge.call('requestLocationPermission', args)).permission);
             },
+            /** Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"). Web'de false. */
+            permissionGranted: async () => { var _a; return Boolean((_a = (await this.bridge.call('getLocationPermission'))) === null || _a === void 0 ? void 0 : _a.permission); },
+            /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
+            backgroundPermissionGranted: async () => { var _a; return Boolean((_a = (await this.bridge.call('getLocationPermission'))) === null || _a === void 0 ? void 0 : _a.background); },
+            /**
+             * Arka plan konum iznini ister (bölge izleme için). Android: açıklama diyaloğu (`rationale`; verilmezse SDK metni),
+             * ardından `ACCESS_BACKGROUND_LOCATION` (Android 11+ sistem Ayarlar ekranını açar; önce ön plan konum izni verilmiş
+             * olmalı). iOS: "her zaman" izni (`rationale` yok sayılır; önce "kullanırken" izni verilmiş olmalı). Sonuç: izin
+             * varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false. Web'de false.
+             */
+            requestBackgroundPermission: async (rationale) => {
+                if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+                    throw new TypeError('Pushizo: rationale metin olmalı.');
+                }
+                const args = {};
+                if (typeof rationale === 'string' && rationale.trim() !== '')
+                    args.rationale = rationale;
+                const result = await this.bridge.call('requestBackgroundLocationPermission', args);
+                return Boolean(result === null || result === void 0 ? void 0 : result.permission);
+            },
+            /** `requestBackgroundPermission` ile aynı izin (iOS adı: "her zaman"); iki ad da her platformda çalışır. */
+            requestAlwaysPermission: async () => {
+                var _a;
+                return Boolean((_a = (await this.bridge.call('requestBackgroundLocationPermission', {}))) === null || _a === void 0 ? void 0 : _a.permission);
+            },
             /**
              * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
-             * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir; köprü izin istemez ve
-             * manifest/Info.plist'e izin eklemez.
+             * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir (`requestBackgroundPermission`);
+             * köprü manifest/Info.plist'e izin eklemez.
              */
             setGeofencingEnabled: (enabled) => this.bridge.call('setGeofencingEnabled', { enabled: Boolean(enabled) }),
             /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
             isGeofencingEnabled: async () => { var _a; return Boolean((_a = (await this.bridge.call('isGeofencingEnabled'))) === null || _a === void 0 ? void 0 : _a.enabled); },
+        };
+        // --- Reklam kimliği (ADR-0037) ---
+        /**
+         * Mobil reklam kimliği (Android GAID, iOS IDFA). SDK reklam kitaplığı ve izin istemi içermez: kimliği uygulama alır
+         * (Android `AdvertisingIdClient`, iOS App Tracking Transparency izninden sonra `ASIdentifierManager`) ve buraya verir.
+         * Kimlik reklam kitlesine yalnızca `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle gider.
+         */
+        this.Ads = {
+            /** Reklam kimliğini yazar; `null` veya sıfır kimlik sunucudaki kaydı siler. Web'de etkisizdir. */
+            setAdvertisingId: (id) => {
+                if (id !== null && id !== undefined && typeof id !== 'string') {
+                    throw new TypeError('Pushizo: id metin veya null olmalı.');
+                }
+                return this.bridge.call('setAdvertisingId', { id: typeof id === 'string' && id.trim() !== '' ? id : null });
+            },
         };
         // --- Android teslimat güçlendirme (ADR-0092) ---
         /**
@@ -810,16 +924,20 @@ class PushizoCore {
     }
     /**
      * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
-     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`. `profile` verilirse e-posta, SMS,
+     * etiket ve takma adlar aynı çağrıda ayarlanır: `login(id, { profile: { email: 'ali@ornek.com' } })`; geçersiz
+     * e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir (yarım kalmış kimlik değişimi olmaz).
      */
     login(externalId, proof) {
         requireString(externalId, 'externalId');
-        const { identityHash, jwt } = typeof proof === 'string' ? { identityHash: proof } : (proof !== null && proof !== void 0 ? proof : {});
+        const { identityHash, jwt, profile } = typeof proof === 'string' ? { identityHash: proof } : (proof !== null && proof !== void 0 ? proof : {});
         const args = { externalId };
         if (identityHash !== undefined && identityHash !== null)
             args.identityHash = requireString(identityHash, 'identityHash');
         if (jwt !== undefined && jwt !== null)
             args.jwt = requireString(jwt, 'jwt');
+        if (profile !== undefined && profile !== null)
+            args.profile = profileArgs(profile);
         return this.bridge.call('login', args);
     }
     /** Süresi dolan kimlik JWT'sini yeniler (giriş yapmış kullanıcı için); sonraki SDK istekleri yeni belirteci taşır. */

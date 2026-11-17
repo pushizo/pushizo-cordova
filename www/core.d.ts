@@ -1,4 +1,4 @@
-import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, DeliveryGuidanceOptions, DeliverySetting, DeliveryStatus, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, DeliveryGuidanceOptions, DeliverySetting, DeliveryStatus, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserConsent, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -43,11 +43,15 @@ export declare class PushizoCore {
     private listen;
     /** SDK'yı başlatır; olay aboneliği burada kurulur. */
     initialize(appIdOrOptions: string | InitializeOptions, options?: Omit<InitializeOptions, 'appId'>): Promise<void>;
+    /** Native SDK başlatıldı mı (`initialize` tamamlandı ya da süreç saklanan yapılandırmayla erkenden başlatıldı). */
+    isInitialized: () => Promise<boolean>;
     /** KVKK/GDPR onayı (`requiresPrivacyConsent: true` ile başlatıldıysa). */
     setConsentGiven(given: boolean): Promise<void>;
     /**
      * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
-     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`. `profile` verilirse e-posta, SMS,
+     * etiket ve takma adlar aynı çağrıda ayarlanır: `login(id, { profile: { email: 'ali@ornek.com' } })`; geçersiz
+     * e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir (yarım kalmış kimlik değişimi olmaz).
      */
     login(externalId: string, proof?: string | LoginOptions): Promise<void>;
     /** Süresi dolan kimlik JWT'sini yeniler (giriş yapmış kullanıcı için); sonraki SDK istekleri yeni belirteci taşır. */
@@ -81,6 +85,18 @@ export declare class PushizoCore {
         getPreferences: () => Promise<UserPreferences>;
         /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
         setPreferences: (preferences: PreferenceInput[]) => Promise<UserPreferences>;
+        /**
+         * Reklam kişiselleştirme rızası (ADR-0037): `true` iken kullanıcının e-posta/telefon özeti app'in bağladığı reklam
+         * platformu kitlelerine gönderilebilir; `false` rızayı geri alır. Güncel tercih listesini döndürür.
+         */
+        setAdsPersonalizationConsent: (granted: boolean) => Promise<UserPreferences>;
+        /** Rıza kayıtları (`ads_personalization` …). Abonelik henüz yoksa `NOT_READY` koduyla reddedilir. */
+        getConsents: () => Promise<UserConsent[]>;
+        /**
+         * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). ADM kaydını kendisi yapan
+         * uygulamalar içindir. iOS ve web'de etkisizdir.
+         */
+        registerAdm: (token: string) => Promise<void>;
         pushSubscription: {
             getState: () => Promise<PushSubscriptionState>;
             getId: () => Promise<string | null>;
@@ -107,6 +123,13 @@ export declare class PushizoCore {
         removeNotification: (id: number | string) => Promise<void>;
         /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
         removeGroupedNotifications: (group: string) => Promise<void>;
+        /**
+         * Uygulama rozetini ayarlar (yalnızca iOS; bildirim uzantısıyla paylaşılan sayaç da eşitlenir). Android'de rozet
+         * görünen bildirimlerden hesaplandığından ve web'de karşılığı olmadığından etkisizdir.
+         */
+        setBadgeCount: (count: number) => Promise<void>;
+        /** Rozeti sıfırlar (yalnızca iOS; Android ve web'de etkisiz). */
+        clearBadge: () => Promise<void>;
         /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
         addClickListener: (cb: Listener<NotificationClickEvent>) => (() => void);
         removeClickListener: (cb: Listener<NotificationClickEvent>) => void;
@@ -197,6 +220,8 @@ export declare class PushizoCore {
         stopListening: () => Promise<void>;
         /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
         attachmentUrl: (attachmentId: string, download?: boolean) => Promise<string>;
+        /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). Web'de her zaman false. */
+        isListening: () => Promise<boolean>;
         /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
         getVisitorId: () => Promise<string | null>;
         /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
@@ -251,14 +276,36 @@ export declare class PushizoCore {
          * açılmaz. Sonuç: izin varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false.
          */
         requestPermission: (rationale?: string) => Promise<boolean>;
+        /** Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"). Web'de false. */
+        permissionGranted: () => Promise<boolean>;
+        /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
+        backgroundPermissionGranted: () => Promise<boolean>;
+        /**
+         * Arka plan konum iznini ister (bölge izleme için). Android: açıklama diyaloğu (`rationale`; verilmezse SDK metni),
+         * ardından `ACCESS_BACKGROUND_LOCATION` (Android 11+ sistem Ayarlar ekranını açar; önce ön plan konum izni verilmiş
+         * olmalı). iOS: "her zaman" izni (`rationale` yok sayılır; önce "kullanırken" izni verilmiş olmalı). Sonuç: izin
+         * varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false. Web'de false.
+         */
+        requestBackgroundPermission: (rationale?: string) => Promise<boolean>;
+        /** `requestBackgroundPermission` ile aynı izin (iOS adı: "her zaman"); iki ad da her platformda çalışır. */
+        requestAlwaysPermission: () => Promise<boolean>;
         /**
          * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
-         * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir; köprü izin istemez ve
-         * manifest/Info.plist'e izin eklemez.
+         * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir (`requestBackgroundPermission`);
+         * köprü manifest/Info.plist'e izin eklemez.
          */
         setGeofencingEnabled: (enabled: boolean) => Promise<void>;
         /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
         isGeofencingEnabled: () => Promise<boolean>;
+    };
+    /**
+     * Mobil reklam kimliği (Android GAID, iOS IDFA). SDK reklam kitaplığı ve izin istemi içermez: kimliği uygulama alır
+     * (Android `AdvertisingIdClient`, iOS App Tracking Transparency izninden sonra `ASIdentifierManager`) ve buraya verir.
+     * Kimlik reklam kitlesine yalnızca `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle gider.
+     */
+    readonly Ads: {
+        /** Reklam kimliğini yazar; `null` veya sıfır kimlik sunucudaki kaydı siler. Web'de etkisizdir. */
+        setAdvertisingId: (id: string | null) => Promise<void>;
     };
     /**
      * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu

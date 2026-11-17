@@ -19,6 +19,16 @@ export interface LoginOptions {
     identityHash?: string;
     /** SDK isteklerinde `Authorization: Bearer` başlığıyla gider; süresi dolunca `updateUserJwt` ile yenilenir. */
     jwt?: string;
+    /** Girişle birlikte ayarlanan profil; geçersiz e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir. */
+    profile?: UserProfile;
+}
+/** `Pushizo.login` ile tek çağrıda ayarlanan profil alanları (native `HsUserProfile`). */
+export interface UserProfile {
+    email?: string;
+    /** E.164 biçiminde telefon numarası. */
+    sms?: string;
+    tags?: Record<string, InAppTriggerValue>;
+    aliases?: Record<string, string>;
 }
 /** Bildirim içeriği (native `HsNotification` / `HSNotification`). */
 export interface PushizoNotification {
@@ -162,6 +172,15 @@ export interface PreferenceCategory {
 export interface UserPreferences {
     preferences: UserPreference[];
     categories: PreferenceCategory[];
+}
+/** Rıza kaydı (`User.getConsents`; ADR-0037): `ads_personalization` gibi ayrılmış amaç anahtarları. */
+export interface UserConsent {
+    purpose: string;
+    granted: boolean;
+    /** Kaydı yazan taraf (`sdk`, `api`, `dashboard` …); kayıt yoksa null. */
+    source: string | null;
+    /** Epoch milisaniye; kayıt yoksa null. */
+    updatedAt: number | null;
 }
 /** `User.setPreferences` girdisi; `channel` verilmezse veya null ise tüm kanallar. */
 export interface PreferenceInput {

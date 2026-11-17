@@ -20,7 +20,7 @@ function facadeMethods(): Set<string> {
 describe('native sözleşme', () => {
   const methods = facadeMethods();
   // Adaptörde (Activity/izin API'si) ele alınanlar.
-  const adapterHandled = new Set(['requestPermission', 'requestLocationPermission']);
+  const adapterHandled = new Set(['requestPermission', 'requestLocationPermission', 'requestBackgroundLocationPermission']);
 
   it('cephe beklenen metot kümesini kullanır', () => {
     expect(methods.size).toBeGreaterThan(30);
@@ -124,10 +124,9 @@ describe('native sözleşme', () => {
     expect(kt).toContain('"isLocationShared" -> reply.success(JSONObject().put("shared", Pushizo.Location.isShared))');
     expect(kt).toContain('JSONObject().put("permission", Pushizo.Location.permissionGranted)');
     expect(kt).toContain('Pushizo.Location.onPermissionResult()');
-    // Yalnızca uygulama manifest'inde tanımlı konum izinleri istenir; arka plan konumu yok.
+    // Yalnızca uygulama manifest'inde tanımlı konum izinleri istenir.
     expect(kt).toContain('PackageManager.GET_PERMISSIONS');
     expect(kt).toContain('arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)');
-    expect(kt).not.toContain('ACCESS_BACKGROUND_LOCATION');
     // Açıklama diyaloğu SDK string kaynaklarıyla; "Şimdi değil"/iptal false döner.
     for (const key of ['title', 'message', 'continue', 'not_now']) {
       expect(kt).toContain(`com.pushizo.sdk.R.string.hs_location_rationale_${key}`);
@@ -168,8 +167,7 @@ describe('native sözleşme', () => {
     expect(kt).toContain('private const val MAX_PLACEMENT_CACHE = 50');
     expect(kt).toContain('HsLog.d("yerleşim mesajı bulunamadı: $id")');
     expect(kt).toContain('fun HsInAppMessage.toBridgeJson(): JSONObject');
-    // Köprü arka plan konum izni istemez ve manifeste eklemez (ADR-0065 §2).
-    expect(kt).not.toContain('ACCESS_BACKGROUND_LOCATION');
+    // Köprü arka plan konum iznini manifeste eklemez (ADR-0065 §2); izin `requestBackgroundLocationPermission` ile istenir.
 
     expect(swift).toContain('Pushizo.Location.setGeofencingEnabled(args["enabled"] as? Bool ?? false)');
     expect(swift).toContain('case "isGeofencingEnabled": ok(["enabled": Pushizo.Location.isGeofencingEnabled])');
@@ -182,8 +180,77 @@ describe('native sözleşme', () => {
     expect(swift).toContain('Pushizo.Placements.reportDismiss(message)');
     expect(swift).toContain('private static let maxPlacementCache = 50');
     expect(swift).toContain('static func map(_ m: HSInAppMessage) -> [String: Any]');
-    expect(swift).not.toContain('requestAlwaysPermission');
     expect(read('plugin.xml')).not.toContain('ACCESS_BACKGROUND_LOCATION');
+  });
+
+  it('yerel API eşitliği: profille login, reklam rızası, reklam kimliği, rozet, ADM, konum izni ve sohbet dinleme', () => {
+    expect([...methods]).toEqual(
+      expect.arrayContaining([
+        'isInitialized', 'setAdsPersonalizationConsent', 'getConsents', 'registerAdm', 'setAdvertisingId', 'setBadgeCount',
+        'getLocationPermission', 'requestBackgroundLocationPermission', 'chatIsListening',
+      ]),
+    );
+    const kt = read('src/android/com/pushizo/cordova/PushizoBridgeCore.kt');
+    expect(kt).toContain('"isInitialized" -> reply.success(JSONObject().put("initialized", Pushizo.isInitialized))');
+    // Profil yerel `login(externalId, HsUserProfile, identityHash, jwt)` aşırı yüklemesine gider (doğrulama girişten önce).
+    expect(kt).toContain('val profile = args.optJSONObject("profile")');
+    expect(kt).toMatch(/Pushizo\.login\(\s+args\.requireString\("externalId"\),\s+HsUserProfile\(/);
+    for (const field of ['email = profile.optStringOrNull("email")', 'sms = profile.optStringOrNull("sms")', 'tags = profile.stringMap("tags")', 'aliases = profile.stringMap("aliases")']) {
+      expect(kt).toContain(field);
+    }
+    expect(kt).toContain('Pushizo.User.setAdsPersonalizationConsent(args.optBoolean("granted", false), callback(reply) { it.toJson() })');
+    expect(kt).toContain('Pushizo.User.getConsents(callback(reply) { list -> JSONObject().put("consents", JSONArray(list.map { it.toJson() })) })');
+    const consentJson = kt.slice(kt.indexOf('fun HsConsent.toJson()'), kt.indexOf('fun HsPreferencesResult.toJson()'));
+    for (const field of ['purpose', 'granted', 'source', 'updatedAt']) expect(consentJson.includes(`.put("${field}", `), field).toBe(true);
+    expect(kt).toContain('Pushizo.User.registerAdm(args.requireString("token"))');
+    expect(kt).toContain('Pushizo.Ads.setAdvertisingId(args.optStringOrNull("id"))');
+    // Rozet iOS'a özgüdür: Android'de etkisiz, hata yok.
+    expect(kt).toContain('"setBadgeCount" -> reply.success(null)');
+    expect(kt).toContain('JSONObject().put("permission", Pushizo.Location.permissionGranted).put("background", Pushizo.Location.backgroundPermissionGranted)');
+    expect(kt).toContain('"chatIsListening" -> reply.success(JSONObject().put("listening", Pushizo.Chat.isListening))');
+    // Arka plan izni: zaten varsa true; yalnızca manifest'te tanımlıysa istenir; vazgeçilirse yanıt askıda kalmaz.
+    expect(kt).toContain('fun requestBackgroundLocationPermission(activity: Activity?, args: JSONObject, reply: Reply, requestSystem: (Array<String>) -> Unit)');
+    expect(kt).toContain('if (Pushizo.Location.backgroundPermissionGranted) {');
+    expect(kt).toContain('declaredPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))');
+    expect(kt).toContain('val legacy = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q');
+    for (const key of ['hs_geofence_rationale_title', 'hs_geofence_rationale_message']) expect(kt).toContain(`com.pushizo.sdk.R.string.${key}`);
+    expect(kt).toContain('.setNegativeButton(com.pushizo.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(backgroundLocationPermissionJson()) }');
+    expect(kt).toContain('.setOnCancelListener { reply.success(backgroundLocationPermissionJson()) }');
+    expect(kt).toContain('fun backgroundLocationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.backgroundPermissionGranted)');
+    const plugin = read('src/android/com/pushizo/cordova/PushizoCordovaPlugin.kt');
+    expect(plugin).toContain('"requestBackgroundLocationPermission" -> requestBackgroundLocationPermission(args.optJSONObject(0) ?: JSONObject(), callbackContext)');
+    expect(plugin).toContain('core.requestBackgroundLocationPermission(cordova.activity, args, reply(callbackContext))');
+    expect(plugin).toContain('cordova.requestPermissions(this, BACKGROUND_LOCATION_REQUEST_CODE, permissions)');
+    expect(plugin).toContain('val result = core.onBackgroundLocationPermissionResult()');
+    // Yanıtsız kalan önceki istek güncel izin durumuyla kapatılır.
+    expect(plugin).toContain('previous?.success(core.backgroundLocationPermissionJson())');
+    const selectors = read('src/ios/PushizoCordovaPlugin.swift');
+    for (const m of ['isInitialized', 'setAdsPersonalizationConsent', 'getConsents', 'registerAdm', 'setAdvertisingId', 'setBadgeCount', 'getLocationPermission', 'requestBackgroundLocationPermission', 'chatIsListening']) {
+      expect(selectors).toContain(`@objc(${m}:) func ${m}(_ command: CDVInvokedUrlCommand) { dispatch(command) }`);
+    }
+    // Köprü arka plan konum iznini manifest'e eklemez; uygulama tanımlar.
+    expect(read('plugin.xml')).not.toContain('ACCESS_BACKGROUND_LOCATION');
+
+    const swift = read('src/ios/PushizoBridgeCore.swift');
+    expect(swift).toContain('case "isInitialized": ok(["initialized": Pushizo.isInitialized])');
+    // iOS'ta profil aşırı yüklemesi yoktur: köprü doğrular, giriş yapar, ardından alanları yazar.
+    const login = swift.slice(swift.indexOf('case "login":'), swift.indexOf('case "updateUserJwt":'));
+    expect(login.indexOf('HSContacts.normalizeEmail(email) == nil')).toBeGreaterThan(0);
+    expect(login.indexOf('HSContacts.normalizePhone(sms) == nil')).toBeGreaterThan(0);
+    expect(login.indexOf('HSContacts.normalizePhone(sms) == nil')).toBeLessThan(login.indexOf('Pushizo.login(externalId, identityHash: identityHash, jwt: jwt)'));
+    for (const call of ['Pushizo.User.addEmail(email)', 'Pushizo.User.addSms(sms)', 'Pushizo.User.addTags(tags)', 'Pushizo.User.addAliases(aliases)']) {
+      expect(login.indexOf(call), call).toBeGreaterThan(login.indexOf('Pushizo.login(externalId, identityHash: identityHash, jwt: jwt)'));
+    }
+    expect(swift).toContain('Self.map(try await Pushizo.User.setAdsPersonalizationConsent(granted))');
+    expect(swift).toContain('["consents": try await Pushizo.User.getConsents().map { Self.map($0) }]');
+    expect(swift).toContain('static func map(_ consent: HSUserConsent) -> [String: Any]');
+    expect(swift).toContain('case "registerAdm": ok()');
+    expect(swift).toContain('case "setAdvertisingId": Pushizo.Ads.setAdvertisingId(string("id")); ok()');
+    expect(swift).toContain('Pushizo.Notifications.setBadgeCount(count); ok()');
+    expect(swift).toContain('"background": status == .authorizedAlways');
+    expect(swift).toContain('if #available(iOS 14.0, *) { return CLLocationManager().authorizationStatus }');
+    expect(swift).toContain('Pushizo.Location.requestAlwaysPermission { granted in ok(["permission": granted]) }');
+    expect(swift).toContain('case "chatIsListening": ok(["listening": Pushizo.Chat.isListening])');
   });
 
   it('yerel SDK bağımlılıkları bayrak/yerleşim/bölge izleme sunan sürümlerde (Android 0.2.1, iOS 0.2)', () => {

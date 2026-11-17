@@ -12,6 +12,7 @@ import com.pushizo.sdk.HsCallback
 import com.pushizo.sdk.HsChatEventAdapter
 import com.pushizo.sdk.HsChatOpenListener
 import com.pushizo.sdk.HsClickEvent
+import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
 import com.pushizo.sdk.HsInAppAction
 import com.pushizo.sdk.HsInAppBlock
@@ -35,6 +36,7 @@ import com.pushizo.sdk.HsPreference
 import com.pushizo.sdk.HsPreferenceInput
 import com.pushizo.sdk.HsPreferencesResult
 import com.pushizo.sdk.HsPushSubscriptionState
+import com.pushizo.sdk.HsUserProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
@@ -208,8 +210,69 @@ internal class PushizoBridgeCore(
 
     fun locationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.permissionGranted)
 
+    /**
+     * Arka plan konum izni akışı (bölge izleme, ADR-0065): Android SDK'nın `Location.requestBackgroundPermission` sonucu
+     * geri çağrıyla bildirilmediğinden köprü aynı adımları kendi izin mekanizmasıyla yürütür. İzin zaten varsa true.
+     * Android 10 öncesinde arka plan izni ayrı değildir: normal konum izinleri istenir. Android 10+ için uygulama
+     * manifest'inde `ACCESS_BACKGROUND_LOCATION` yoksa veya Activity yoksa false. Değilse açıklama diyaloğu gösterilir;
+     * "Şimdi değil"/iptal false döner, "Devam" ise [requestSystem] ile sistem izni istenir (Android 11+ Ayarlar ekranı
+     * açılır) — sonuç geldiğinde köprü [onBackgroundLocationPermissionResult] yanıtını döndürür.
+     */
+    fun requestBackgroundLocationPermission(activity: Activity?, args: JSONObject, reply: Reply, requestSystem: (Array<String>) -> Unit) {
+        if (!Pushizo.isInitialized) {
+            reply.error("NOT_READY", NOT_INITIALIZED)
+            return
+        }
+        if (Pushizo.Location.backgroundPermissionGranted) {
+            reply.success(onBackgroundLocationPermissionResult())
+            return
+        }
+        val legacy = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        val permissions = if (legacy) declaredLocationPermissions() else declaredPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        if (permissions.isEmpty()) {
+            HsLog.w(
+                if (legacy) "konum izni istenemedi: uygulama manifest'inde ACCESS_COARSE_LOCATION/ACCESS_FINE_LOCATION yok"
+                else "arka plan konum izni istenemedi: uygulama manifest'inde ACCESS_BACKGROUND_LOCATION yok",
+            )
+            reply.success(backgroundLocationPermissionJson())
+            return
+        }
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            HsLog.w("arka plan konum izni istenemedi: etkin Activity yok")
+            reply.success(backgroundLocationPermissionJson())
+            return
+        }
+        val rationale = args.optStringOrNull("rationale")?.takeIf { it.isNotBlank() }
+        val title = if (legacy) com.pushizo.sdk.R.string.hs_location_rationale_title else com.pushizo.sdk.R.string.hs_geofence_rationale_title
+        val message = if (legacy) com.pushizo.sdk.R.string.hs_location_rationale_message else com.pushizo.sdk.R.string.hs_geofence_rationale_message
+        activity.runOnUiThread {
+            if (activity.isFinishing || activity.isDestroyed) {
+                reply.success(backgroundLocationPermissionJson())
+                return@runOnUiThread
+            }
+            AlertDialog.Builder(activity)
+                .setTitle(title)
+                .setMessage(rationale ?: activity.getString(message))
+                .setPositiveButton(com.pushizo.sdk.R.string.hs_location_rationale_continue) { _, _ -> requestSystem(permissions) }
+                .setNegativeButton(com.pushizo.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(backgroundLocationPermissionJson()) }
+                .setOnCancelListener { reply.success(backgroundLocationPermissionJson()) }
+                .show()
+        }
+    }
+
+    /** Sistem izin sonucu: SDK bilgilendirilir (bölge izleme açıksa bölgeler yenilenir), güncel arka plan izni döner. */
+    fun onBackgroundLocationPermissionResult(): JSONObject {
+        Pushizo.Location.onPermissionResult()
+        return backgroundLocationPermissionJson()
+    }
+
+    fun backgroundLocationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.backgroundPermissionGranted)
+
     /** Uygulama manifest'inde tanımlı konum izinleri (eklenti izinleri otomatik eklemez; README "Konum"). */
-    private fun declaredLocationPermissions(): Array<String> {
+    private fun declaredLocationPermissions(): Array<String> = declaredPermissions(LOCATION_PERMISSIONS)
+
+    /** [candidates] içinden uygulama manifest'inde tanımlı olanlar. */
+    private fun declaredPermissions(candidates: Array<String>): Array<String> {
         val requested = try {
             val pm = context.packageManager
             val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -222,12 +285,12 @@ internal class PushizoBridgeCore(
         } catch (e: PackageManager.NameNotFoundException) {
             emptySet()
         }
-        return LOCATION_PERMISSIONS.filter { it in requested }.toTypedArray()
+        return candidates.filter { it in requested }.toTypedArray()
     }
 
     /**
-     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission` ve `requestLocationPermission` Activity
-     * gerektirdiğinden köprü sınıfında ele alınır.
+     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission`, `requestLocationPermission` ve
+     * `requestBackgroundLocationPermission` Activity gerektirdiğinden köprü sınıfında ele alınır.
      */
     fun handle(method: String, args: JSONObject, reply: Reply): Boolean {
         try {
@@ -246,8 +309,25 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "setConsentGiven" -> { Pushizo.setConsentGiven(args.optBoolean("given", false)); reply.success(null) }
+                "isInitialized" -> reply.success(JSONObject().put("initialized", Pushizo.isInitialized))
                 "login" -> {
-                    Pushizo.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    // Profil (isteğe bağlı): geçersiz e-posta/telefon yerel SDK'da girişten önce reddedilir (INVALID_ARGUMENT).
+                    val profile = args.optJSONObject("profile")
+                    if (profile == null) {
+                        Pushizo.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    } else {
+                        Pushizo.login(
+                            args.requireString("externalId"),
+                            HsUserProfile(
+                                email = profile.optStringOrNull("email"),
+                                sms = profile.optStringOrNull("sms"),
+                                tags = profile.stringMap("tags"),
+                                aliases = profile.stringMap("aliases"),
+                            ),
+                            args.optStringOrNull("identityHash"),
+                            args.optStringOrNull("jwt"),
+                        )
+                    }
                     reply.success(null)
                 }
                 "updateUserJwt" -> { Pushizo.updateUserJwt(args.requireString("jwt")); reply.success(null) }
@@ -271,6 +351,13 @@ internal class PushizoBridgeCore(
                 // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
                 "getPreferences" -> Pushizo.User.getPreferences(callback(reply) { it.toJson() })
                 "setPreferences" -> Pushizo.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
+                // Reklam kişiselleştirme rızası (ADR-0037): tercih ucundaki ayrılmış `ads_personalization` anahtarı.
+                "setAdsPersonalizationConsent" -> Pushizo.User.setAdsPersonalizationConsent(args.optBoolean("granted", false), callback(reply) { it.toJson() })
+                "getConsents" -> Pushizo.User.getConsents(callback(reply) { list -> JSONObject().put("consents", JSONArray(list.map { it.toJson() })) })
+                // Fire OS ADM kayıt kimliği; geçersiz kimlik → IllegalArgumentException → INVALID_ARGUMENT.
+                "registerAdm" -> { Pushizo.User.registerAdm(args.requireString("token")); reply.success(null) }
+                // Reklam kimliği (GAID): null veya sıfır kimlik sunucudaki kaydı siler.
+                "setAdvertisingId" -> { Pushizo.Ads.setAdvertisingId(args.optStringOrNull("id")); reply.success(null) }
 
                 "getPushSubscription" -> reply.success(Pushizo.User.pushSubscription.state.toJson())
                 "optIn" -> { Pushizo.User.pushSubscription.optIn(); reply.success(null) }
@@ -289,6 +376,8 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "removeGroupedNotifications" -> { Pushizo.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }
+                // Uygulama rozeti iOS'a özgüdür; Android'de rozet görünen bildirimlerden hesaplanır: etkisiz, hata yok.
+                "setBadgeCount" -> reply.success(null)
                 "setForegroundHandlerEnabled" -> { foregroundHandlerEnabled = args.optBoolean("enabled", false); reply.success(null) }
                 "displayNotification" -> {
                     val id = args.requireString("notificationId")
@@ -331,6 +420,9 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "isLocationShared" -> reply.success(JSONObject().put("shared", Pushizo.Location.isShared))
+                "getLocationPermission" -> reply.success(
+                    JSONObject().put("permission", Pushizo.Location.permissionGranted).put("background", Pushizo.Location.backgroundPermissionGranted),
+                )
                 // Arka plan bölge izleme (ADR-0065): varsayılan kapalı; köprü izin istemez, manifest'e izin eklemez.
                 "setGeofencingEnabled" -> {
                     check(Pushizo.isInitialized) { NOT_INITIALIZED }
@@ -417,6 +509,7 @@ internal class PushizoBridgeCore(
                     JSONObject().put("url", Pushizo.Chat.attachmentUrl(args.requireString("attachmentId"), args.optBoolean("download", false))),
                 )
                 "chatGetVisitorId" -> reply.success(JSONObject().put("visitorId", Pushizo.Chat.visitorId.orNull()))
+                "chatIsListening" -> reply.success(JSONObject().put("listening", Pushizo.Chat.isListening))
                 else -> return false
             }
         } catch (e: IllegalArgumentException) {
@@ -574,6 +667,13 @@ internal class PushizoBridgeCore(
             .put("description", JSONObject(description))
             .put("channels", channels?.let { JSONArray(it) }.orNull())
             .put("defaultOptedIn", defaultOptedIn)
+
+        /** Rıza kaydı (ADR-0037); `updatedAt` epoch milisaniye. */
+        fun HsConsent.toJson(): JSONObject = JSONObject()
+            .put("purpose", purpose)
+            .put("granted", granted)
+            .put("source", source.orNull())
+            .put("updatedAt", updatedAt.orNull())
 
         fun HsPreferencesResult.toJson(): JSONObject = JSONObject()
             .put("preferences", JSONArray(preferences.map { it.toJson() }))

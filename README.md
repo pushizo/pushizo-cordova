@@ -35,6 +35,7 @@ Pushizo'nun Cordova eklentisi. Native Pushizo Android (`com.pushizo:pushizo-andr
 - Konum paylaşımı (yalnızca ön plan, açıklama + izin istemi) ve arka plan bölge izleme
 - Özellik bayrakları (`FeatureFlags`) ve gömülü yerleşimler (`Placements`)
 - Android teslimat güçlendirme (`Delivery`: üretici/ROM teşhisi, ayar ekranına yönlendirme; iOS'ta zararsız)
+- Profille `login`, reklam kişiselleştirme rızası (`setAdsPersonalizationConsent`, `getConsents`), reklam kimliği (`Ads`), iOS rozeti, arka plan konum izni
 - Bildirim kutusu, özel olay, KVKK/GDPR gizlilik onayı, günlük seviyesi, bildirim tepsisini temizleme
 
 ## Kurulum
@@ -201,8 +202,8 @@ const on = await Pushizo.Location.isGeofencingEnabled();
 ```
 
 - Üç koşul birlikte gerekir: `setGeofencingEnabled(true)`, `setShared(true)` ve arka plan konum izni (iOS "Her Zaman",
-  Android `ACCESS_BACKGROUND_LOCATION`). Köprü bu izni **istemez** ve manifest/Info.plist'e **eklemez**; `Info.plist`'e `NSLocationAlwaysAndWhenInUseUsageDescription`, Android manifest'ine `ACCESS_BACKGROUND_LOCATION` eklemek
-  (`config.xml` `<config-file>`/`<edit-config>`) ve izni istemek uygulamanın işidir.
+  Android `ACCESS_BACKGROUND_LOCATION`). Köprü bu izni manifest/Info.plist'e **eklemez**; `Info.plist`'e `NSLocationAlwaysAndWhenInUseUsageDescription`, Android manifest'ine `ACCESS_BACKGROUND_LOCATION` eklemek
+  (`config.xml` `<config-file>`/`<edit-config>`) uygulamanın işidir. İzin `Location.requestBackgroundPermission()` ile istenir (aşağıda).
   Mağaza beyanları ve aydınlatma metni uygulama geliştiricisinin sorumluluğundadır.
 - `initialize` öncesinde `setGeofencingEnabled` `NOT_READY` ile reddedilir. `setShared(false)` veya gizlilik onayının geri
   alınması kayıtlı bölgeleri kaldırır; tercih korunur.
@@ -247,6 +248,38 @@ await Pushizo.Delivery.openSettings('auto_start');      // kendi arayüzünüzde
 
 Yalnızca Android'de etkilidir: iOS'ta `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile `showGuidance`
 hiçbir şey yapmadan `false` döner. Köprü `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` iznini istemez ve manifest'e eklemez.
+
+### Profil, reklam rızası, reklam kimliği ve rozet
+
+Yerel SDK'ların kalan yüzeyi de köprüde vardır; tek platforma özgü çağrılar diğer platformda zararsızdır (istisna yok,
+etkisiz ya da `false`).
+
+```js
+await Pushizo.login('user_42', { jwt, profile: { email: 'ali@ornek.com', sms: '+905551112233', tags: { plan: 'pro' }, aliases: { crm: 'c-1' } } });
+await Pushizo.User.setAdsPersonalizationConsent(true);     // reklam kişiselleştirme rızası; güncel tercihleri döndürür
+const consents = await Pushizo.User.getConsents();         // [{ purpose, granted, source, updatedAt }]
+await Pushizo.Ads.setAdvertisingId(gaidOrIdfa);            // null kaydı siler
+await Pushizo.Notifications.setBadgeCount(3);              // yalnızca iOS
+await Pushizo.Notifications.clearBadge();
+if (await Pushizo.Location.permissionGranted() && !(await Pushizo.Location.backgroundPermissionGranted())) {
+  await Pushizo.Location.requestBackgroundPermission('Mağazaya yaklaşınca haber vermek için'); // iOS: requestAlwaysPermission ile aynı
+}
+const listening = await Pushizo.Chat.isListening();
+const ready = await Pushizo.isInitialized();
+```
+
+| Metot | Açıklama |
+|---|---|
+| `login(externalId, { identityHash?, jwt?, profile? })` | `profile`: `{ email?, sms?, tags?, aliases? }`. Giriş ve profil tek çağrıda; geçersiz e-posta/telefon girişten **önce** `INVALID_ARGUMENT` ile reddedilir. |
+| `User.setAdsPersonalizationConsent(granted)` | `Promise<UserPreferences>`: reklam kişiselleştirme rızası (`ads_personalization`); `false` rızayı geri alır. |
+| `User.getConsents()` | `Promise<UserConsent[]>`: `purpose`, `granted`, `source`, `updatedAt` (epoch ms). Abonelik yoksa `NOT_READY`. |
+| `User.registerAdm(token)` | Fire OS ADM kayıt kimliği (yalnızca Android; geçersiz kimlik `INVALID_ARGUMENT`). iOS: etkisiz. |
+| `Ads.setAdvertisingId(id \| null)` | GAID/IDFA; `null` veya sıfır kimlik sunucudaki kaydı siler. Kimliği uygulama alır (SDK reklam kitaplığı ve ATT istemi içermez). |
+| `Notifications.setBadgeCount(count)` / `clearBadge()` | iOS uygulama rozeti (bildirim uzantısıyla paylaşılan sayaç da eşitlenir). `count` negatif olmayan tam sayı (`RangeError`). Android: etkisiz. |
+| `Location.permissionGranted()` / `backgroundPermissionGranted()` | `Promise<boolean>`: ön plan / arka plan ("Her Zaman") konum izni. |
+| `Location.requestBackgroundPermission(rationale?)` / `requestAlwaysPermission()` | `Promise<boolean>`: arka plan konum izni; iki ad aynı çağrıdır. Android: açıklama diyaloğu + `ACCESS_BACKGROUND_LOCATION` (Android 11+ Ayarlar ekranı; manifest'te yoksa `false`). iOS: "Her Zaman" izni (`rationale` kullanılmaz). |
+| `Chat.isListening()` | `Promise<boolean>`: canlı dinleme açık mı. |
+| `isInitialized()` | `Promise<boolean>`: yerel SDK başlatıldı mı. |
 
 ### Gömülü yerleşimler
 

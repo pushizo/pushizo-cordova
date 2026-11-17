@@ -223,6 +223,118 @@ describe('PushizoCore', () => {
     expect(f.calls).toHaveLength(7);
   });
 
+  it('isInitialized: native durumu döner; eksik yanıt false sayılır', async () => {
+    expect(await new PushizoCore(fakeBridge({ isInitialized: { initialized: true } }).bridge).isInitialized()).toBe(true);
+    expect(await new PushizoCore(fakeBridge().bridge).isInitialized()).toBe(false);
+  });
+
+  it('login profili: alanlar doğrulanıp köprüye iletilir, boş alanlar gönderilmez', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    await hs.login('user_42', { jwt: 'a.b.c', profile: { email: 'ali@ornek.com', sms: '+905551112233', tags: { plan: 'pro', level: 3 }, aliases: { crm: 'c-1' } } });
+    await hs.login('user_42', { profile: { tags: {}, aliases: {} } });
+    await hs.login('user_42', { profile: { email: 'ali@ornek.com' } });
+    expect(f.calls).toEqual([
+      {
+        method: 'login',
+        args: { externalId: 'user_42', jwt: 'a.b.c', profile: { email: 'ali@ornek.com', sms: '+905551112233', tags: { plan: 'pro', level: '3' }, aliases: { crm: 'c-1' } } },
+      },
+      { method: 'login', args: { externalId: 'user_42', profile: {} } },
+      { method: 'login', args: { externalId: 'user_42', profile: { email: 'ali@ornek.com' } } },
+    ]);
+    expect(() => hs.login('user_42', { profile: 'ali' as never })).toThrow(/profile bir nesne/);
+    expect(() => hs.login('user_42', { profile: { email: '  ' } })).toThrow(/profile\.email/);
+    expect(() => hs.login('user_42', { profile: { sms: 5 as never } })).toThrow(/profile\.sms/);
+    expect(() => hs.login('user_42', { profile: { tags: { bad: {} as never } } })).toThrow(/profile\.tags\.bad/);
+    expect(f.calls).toHaveLength(3);
+  });
+
+  it('reklam rızası ve rıza kayıtları: tercih sonucu ve normalize edilmiş liste döner', async () => {
+    const f = fakeBridge({
+      setAdsPersonalizationConsent: { preferences: [], categories: [] },
+      getConsents: {
+        consents: [
+          { purpose: 'ads_personalization', granted: true, source: 'sdk', updatedAt: 1700000000000 },
+          { purpose: 'profiling' },
+          { granted: true },
+          null,
+        ],
+      },
+    });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.User.setAdsPersonalizationConsent(true)).toEqual({ preferences: [], categories: [] });
+    expect(await hs.User.setAdsPersonalizationConsent(false)).toEqual({ preferences: [], categories: [] });
+    expect(await hs.User.getConsents()).toEqual([
+      { purpose: 'ads_personalization', granted: true, source: 'sdk', updatedAt: 1700000000000 },
+      { purpose: 'profiling', granted: false, source: null, updatedAt: null },
+    ]);
+    expect(f.calls).toEqual([
+      { method: 'setAdsPersonalizationConsent', args: { granted: true } },
+      { method: 'setAdsPersonalizationConsent', args: { granted: false } },
+      { method: 'getConsents', args: undefined },
+    ]);
+    await expect(hs.User.setAdsPersonalizationConsent('evet' as never)).rejects.toThrow(/granted boolean/);
+    expect(await new PushizoCore(fakeBridge().bridge).User.getConsents()).toEqual([]);
+  });
+
+  it('registerAdm, Ads.setAdvertisingId ve rozet: argümanlar iletilir, geçersiz değer köprüye gitmez', async () => {
+    const f = fakeBridge();
+    const hs = new PushizoCore(f.bridge);
+    await hs.User.registerAdm('amzn1.adm-registration.v3.abc');
+    await hs.Ads.setAdvertisingId('38400000-8cf0-11bd-b23e-10b96e40000d');
+    await hs.Ads.setAdvertisingId(null);
+    await hs.Ads.setAdvertisingId('  ');
+    await hs.Notifications.setBadgeCount(3);
+    await hs.Notifications.setBadgeCount(0);
+    await hs.Notifications.clearBadge();
+    expect(f.calls).toEqual([
+      { method: 'registerAdm', args: { token: 'amzn1.adm-registration.v3.abc' } },
+      { method: 'setAdvertisingId', args: { id: '38400000-8cf0-11bd-b23e-10b96e40000d' } },
+      { method: 'setAdvertisingId', args: { id: null } },
+      { method: 'setAdvertisingId', args: { id: null } },
+      { method: 'setBadgeCount', args: { count: 3 } },
+      { method: 'setBadgeCount', args: { count: 0 } },
+      { method: 'setBadgeCount', args: { count: 0 } },
+    ]);
+    expect(() => hs.User.registerAdm('')).toThrow(/token/);
+    expect(() => hs.Ads.setAdvertisingId(42 as never)).toThrow(/id metin veya null/);
+    expect(() => hs.Notifications.setBadgeCount(-1)).toThrow(/count/);
+    expect(() => hs.Notifications.setBadgeCount(1.5)).toThrow(/count/);
+    expect(() => hs.Notifications.setBadgeCount('3' as never)).toThrow(RangeError);
+    expect(f.calls).toHaveLength(7);
+  });
+
+  it('Location izin durumu ve arka plan izni: iki ad aynı native çağrıya gider; eksik yanıt false', async () => {
+    const f = fakeBridge({ getLocationPermission: { permission: true, background: false }, requestBackgroundLocationPermission: { permission: true } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Location.permissionGranted()).toBe(true);
+    expect(await hs.Location.backgroundPermissionGranted()).toBe(false);
+    expect(await hs.Location.requestBackgroundPermission('Mağazaya yaklaşınca haber vermek için')).toBe(true);
+    expect(await hs.Location.requestBackgroundPermission('  ')).toBe(true);
+    expect(await hs.Location.requestAlwaysPermission()).toBe(true);
+    expect(f.calls).toEqual([
+      { method: 'getLocationPermission', args: undefined },
+      { method: 'getLocationPermission', args: undefined },
+      { method: 'requestBackgroundLocationPermission', args: { rationale: 'Mağazaya yaklaşınca haber vermek için' } },
+      { method: 'requestBackgroundLocationPermission', args: {} },
+      { method: 'requestBackgroundLocationPermission', args: {} },
+    ]);
+    await expect(hs.Location.requestBackgroundPermission(7 as never)).rejects.toThrow(/rationale metin olmalı/);
+    // Desteklemeyen platform (web) ya da eksik yanıt: istisna yok, false.
+    const empty = new PushizoCore(fakeBridge().bridge);
+    expect(await empty.Location.permissionGranted()).toBe(false);
+    expect(await empty.Location.backgroundPermissionGranted()).toBe(false);
+    expect(await empty.Location.requestBackgroundPermission()).toBe(false);
+    expect(await empty.Location.requestAlwaysPermission()).toBe(false);
+  });
+
+  it('Chat.isListening: native durumu döner; eksik yanıt false', async () => {
+    const f = fakeBridge({ chatIsListening: { listening: true } });
+    expect(await new PushizoCore(f.bridge).Chat.isListening()).toBe(true);
+    expect(f.calls).toEqual([{ method: 'chatIsListening', args: undefined }]);
+    expect(await new PushizoCore(fakeBridge().bridge).Chat.isListening()).toBe(false);
+  });
+
   it('tag/tetik değerleri metne çevrilir, null değerler atlanır, nesne reddedilir', async () => {
     const f = fakeBridge({ getTags: { tags: { plan: 'pro' } }, getTriggers: { triggers: { level: '3' } } });
     const hs = new PushizoCore(f.bridge);

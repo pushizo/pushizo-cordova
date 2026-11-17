@@ -12,6 +12,7 @@ declare namespace Pushizo {
   type LogLevel = Definitions.LogLevel;
   type InitializeOptions = Definitions.InitializeOptions;
   type LoginOptions = Definitions.LoginOptions;
+  type UserProfile = Definitions.UserProfile;
   type PushizoNotification = Definitions.PushizoNotification;
   type NotificationClickEvent = Definitions.NotificationClickEvent;
   type ForegroundWillDisplayEvent = Definitions.ForegroundWillDisplayEvent;
@@ -47,6 +48,7 @@ declare namespace Pushizo {
   type PreferenceCategory = Definitions.PreferenceCategory;
   type UserPreferences = Definitions.UserPreferences;
   type PreferenceInput = Definitions.PreferenceInput;
+  type UserConsent = Definitions.UserConsent;
   type ChatMessage = Definitions.ChatMessage;
   type ChatAttachment = Definitions.ChatAttachment;
   type ChatQuickReply = Definitions.ChatQuickReply;
