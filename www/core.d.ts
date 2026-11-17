@@ -1,4 +1,4 @@
-import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, DeliveryGuidanceOptions, DeliverySetting, DeliveryStatus, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
 /** Native katmandan gelen olay adları. */
 export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
@@ -259,6 +259,29 @@ export declare class PushizoCore {
         setGeofencingEnabled: (enabled: boolean) => Promise<void>;
         /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
         isGeofencingEnabled: () => Promise<boolean>;
+    };
+    /**
+     * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu
+     * için bildirimler gecikir ya da gelmez. Bu yüzey cihazdaki kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+     * Yalnızca Android'de etkilidir: iOS ve web'de `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile
+     * `showGuidance` hiçbir şey yapmadan `false` döner.
+     */
+    readonly Delivery: {
+        /** Cihazın teslim durumu: üretici, ROM, pil muafiyeti, arka plan kısıtı, risk ve önerilen ayar ekranları. */
+        status: () => Promise<DeliveryStatus>;
+        /** Hazır açıklama diyaloğu şimdi gösterilmeli mi: teslim riski var ve diyalog son `minIntervalDays` günde gösterilmedi. */
+        shouldShowGuidance: (minIntervalDays?: number) => Promise<boolean>;
+        /**
+         * Ayar ekranını açar (`auto`: duruma en uygun ekran). Üreticiye özgü ekran bulunamazsa standart Android ekranına
+         * düşülür. Bir ekran açıldıysa true.
+         */
+        openSettings: (setting?: DeliverySetting) => Promise<boolean>;
+        /**
+         * Hazır açıklama diyaloğunu gösterir (22 dil; `message` verilirse SDK metni yerine o gösterilir). Kullanıcı kabul
+         * ederse `setting` ekranı açılır. Ayar ekranı açıldıysa true; kullanıcı vazgeçtiyse, ekran açılamadıysa ya da etkin
+         * Activity yoksa false. SDK diyaloğu kendiliğinden göstermez; uygun anı uygulama seçer (`shouldShowGuidance`).
+         */
+        showGuidance: (options?: DeliveryGuidanceOptions) => Promise<boolean>;
     };
     /**
      * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `PushizoDefaultLiveActivityAttributes` türünü kullanır;

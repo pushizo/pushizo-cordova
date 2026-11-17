@@ -31,6 +31,13 @@ async function usage(): Promise<void> {
   await Pushizo.Location.setGeofencingEnabled(shared);
   const geofencing: boolean = await window.Pushizo.Location.isGeofencingEnabled();
   void geofencing;
+  const delivery: Pushizo.DeliveryStatus = await Pushizo.Delivery.status();
+  const risk: Pushizo.DeliveryRisk = delivery.risk;
+  const setting: Pushizo.DeliverySetting = delivery.recommendedSettings[0] ?? 'auto';
+  const guidance: Pushizo.DeliveryGuidanceOptions = { setting, message: 'Bildirimleri kaçırmayın' };
+  if (risk !== 'none' && (await window.Pushizo.Delivery.shouldShowGuidance(30))) await Pushizo.Delivery.showGuidance(guidance);
+  const opened: boolean = await Pushizo.Delivery.openSettings('battery_optimization');
+  void opened;
   const refreshed: boolean = await Pushizo.FeatureFlags.refresh();
   const enabled: boolean = await Pushizo.FeatureFlags.isEnabled('yeni_sepet', refreshed);
   const limit: number | null = await window.Pushizo.FeatureFlags.getValue('sepet_limiti', 10);

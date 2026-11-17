@@ -34,6 +34,7 @@ Pushizo'nun Cordova eklentisi. Native Pushizo Android (`com.pushizo:pushizo-andr
 - In-app mesajlar (tetik, ekran, duraklatma, tıklama ve yaşam döngüsü olayları; native çizim)
 - Konum paylaşımı (yalnızca ön plan, açıklama + izin istemi) ve arka plan bölge izleme
 - Özellik bayrakları (`FeatureFlags`) ve gömülü yerleşimler (`Placements`)
+- Android teslimat güçlendirme (`Delivery`: üretici/ROM teşhisi, ayar ekranına yönlendirme; iOS'ta zararsız)
 - Bildirim kutusu, özel olay, KVKK/GDPR gizlilik onayı, günlük seviyesi, bildirim tepsisini temizleme
 
 ## Kurulum
@@ -222,6 +223,30 @@ const refreshed = await Pushizo.FeatureFlags.refresh();                  // yeni
 
 `isEnabled(key, default = false)` ve `getValue(key, default = null)` yerel önbellekten okur; köprü asenkron olduğundan
 Promise döndürürler. Boş anahtar `TypeError` ile reddedilir.
+
+### Android teslimat güçlendirme
+
+Xiaomi, Huawei, Oppo, Vivo ve Samsung gibi üreticilerde pil ve otomatik başlatma yöneticisi arka plandaki uygulamayı durdurur;
+bildirim gecikir ya da gelmez ([rehber](https://docs.pushizo.com/docs/channels/android-delivery)). `Pushizo.Delivery` cihazdaki
+kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+
+```ts
+const status = await Pushizo.Delivery.status(); // { supported, vendor, rom, risk, restricted, recommendedSettings, … }
+if (await Pushizo.Delivery.shouldShowGuidance()) {      // risk var ve diyalog son 14 günde gösterilmedi
+  const opened = await Pushizo.Delivery.showGuidance(); // hazır diyalog (22 dil); kabul edilirse ayar ekranı açılır
+}
+await Pushizo.Delivery.openSettings('auto_start');      // kendi arayüzünüzden
+```
+
+| Metot | Açıklama |
+|---|---|
+| `Delivery.status()` | `Promise<DeliveryStatus>`: `supported`, `manufacturer`, `brand`, `vendor`, `aggressiveVendor`, `rom`, `romVersion`, `notificationsEnabled`, `channelBlocked`, `batteryOptimizationExempt`, `backgroundRestricted`, `standbyBucket`, `powerSaveMode`, `dataSaverEnabled`, `restricted`, `risk` (`none` \| `elevated` \| `high`), `recommendedSettings`. |
+| `Delivery.shouldShowGuidance(minIntervalDays = 14)` | `Promise<boolean>`: teslim riski var ve hazır diyalog son `minIntervalDays` günde gösterilmedi. |
+| `Delivery.openSettings(setting = 'auto')` | `Promise<boolean>`: ayar ekranı açıldı mı. `setting`: `auto` \| `notifications` \| `auto_start` \| `battery_optimization` \| `app_details`; üreticiye özgü ekran yoksa standart Android ekranına düşülür. |
+| `Delivery.showGuidance({ setting?, message? })` | `Promise<boolean>`: hazır açıklama diyaloğu; kullanıcı kabul etti ve ayar ekranı açıldıysa `true`. SDK diyaloğu kendiliğinden göstermez. |
+
+Yalnızca Android'de etkilidir: iOS'ta `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile `showGuidance`
+hiçbir şey yapmadan `false` döner. Köprü `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` iznini istemez ve manifest'e eklemez.
 
 ### Gömülü yerleşimler
 

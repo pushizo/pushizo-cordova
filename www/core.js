@@ -122,6 +122,44 @@ function stringArray(value) {
     return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
 }
 /** Native tercih yanıtını eksik alanlara karşı normalize eder (zamanlar epoch milisaniye). */
+const DELIVERY_SETTINGS = ['auto', 'notifications', 'auto_start', 'battery_optimization', 'app_details'];
+function deliverySetting(value) {
+    if (value === undefined || value === null)
+        return 'auto';
+    if (!DELIVERY_SETTINGS.includes(value)) {
+        throw new TypeError(`Pushizo: setting ${DELIVERY_SETTINGS.join('|')} olmalı.`);
+    }
+    return value;
+}
+/** Native teslim durumu; `supported` true değilse (iOS, web, başlatılmamış SDK) "desteklenmiyor / risk yok" durumu. */
+function normalizeDeliveryStatus(raw) {
+    const m = raw !== null && raw !== void 0 ? raw : {};
+    const supported = m.supported === true;
+    const text = (value, fallback) => (supported && typeof value === 'string' ? value : fallback);
+    // Native SDK'nın ileride ekleyeceği, bu sürümün tanımadığı ekran atlanır.
+    const recommendedSettings = supported
+        ? stringArray(m.recommendedSettings).filter((s) => s !== 'auto' && DELIVERY_SETTINGS.includes(s))
+        : [];
+    return {
+        supported,
+        manufacturer: text(m.manufacturer, ''),
+        brand: text(m.brand, ''),
+        vendor: text(m.vendor, 'other'),
+        aggressiveVendor: supported && m.aggressiveVendor === true,
+        rom: text(m.rom, ''),
+        romVersion: supported && typeof m.romVersion === 'string' ? m.romVersion : null,
+        notificationsEnabled: !supported || m.notificationsEnabled !== false,
+        channelBlocked: supported && m.channelBlocked === true,
+        batteryOptimizationExempt: !supported || m.batteryOptimizationExempt !== false,
+        backgroundRestricted: supported && m.backgroundRestricted === true,
+        standbyBucket: supported && typeof m.standbyBucket === 'string' ? m.standbyBucket : null,
+        powerSaveMode: supported && m.powerSaveMode === true,
+        dataSaverEnabled: supported && m.dataSaverEnabled === true,
+        restricted: supported && m.restricted === true,
+        risk: supported && (m.risk === 'high' || m.risk === 'elevated') ? m.risk : 'none',
+        recommendedSettings,
+    };
+}
 function normalizePreferences(raw) {
     const preferences = Array.isArray(raw === null || raw === void 0 ? void 0 : raw.preferences) ? raw.preferences : [];
     const categories = Array.isArray(raw === null || raw === void 0 ? void 0 : raw.categories) ? raw.categories : [];
@@ -544,6 +582,50 @@ class PushizoCore {
             setGeofencingEnabled: (enabled) => this.bridge.call('setGeofencingEnabled', { enabled: Boolean(enabled) }),
             /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
             isGeofencingEnabled: async () => { var _a; return Boolean((_a = (await this.bridge.call('isGeofencingEnabled'))) === null || _a === void 0 ? void 0 : _a.enabled); },
+        };
+        // --- Android teslimat güçlendirme (ADR-0092) ---
+        /**
+         * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu
+         * için bildirimler gecikir ya da gelmez. Bu yüzey cihazdaki kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+         * Yalnızca Android'de etkilidir: iOS ve web'de `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile
+         * `showGuidance` hiçbir şey yapmadan `false` döner.
+         */
+        this.Delivery = {
+            /** Cihazın teslim durumu: üretici, ROM, pil muafiyeti, arka plan kısıtı, risk ve önerilen ayar ekranları. */
+            status: async () => normalizeDeliveryStatus(await this.bridge.call('deliveryStatus')),
+            /** Hazır açıklama diyaloğu şimdi gösterilmeli mi: teslim riski var ve diyalog son `minIntervalDays` günde gösterilmedi. */
+            shouldShowGuidance: async (minIntervalDays = 14) => {
+                if (!Number.isInteger(minIntervalDays) || minIntervalDays < 0) {
+                    throw new RangeError('Pushizo: minIntervalDays negatif olmayan tam sayı olmalı.');
+                }
+                const result = await this.bridge.call('deliveryShouldShowGuidance', { minIntervalDays });
+                return Boolean(result === null || result === void 0 ? void 0 : result.show);
+            },
+            /**
+             * Ayar ekranını açar (`auto`: duruma en uygun ekran). Üreticiye özgü ekran bulunamazsa standart Android ekranına
+             * düşülür. Bir ekran açıldıysa true.
+             */
+            openSettings: async (setting = 'auto') => {
+                var _a;
+                const args = { setting: deliverySetting(setting) };
+                return Boolean((_a = (await this.bridge.call('deliveryOpenSettings', args))) === null || _a === void 0 ? void 0 : _a.opened);
+            },
+            /**
+             * Hazır açıklama diyaloğunu gösterir (22 dil; `message` verilirse SDK metni yerine o gösterilir). Kullanıcı kabul
+             * ederse `setting` ekranı açılır. Ayar ekranı açıldıysa true; kullanıcı vazgeçtiyse, ekran açılamadıysa ya da etkin
+             * Activity yoksa false. SDK diyaloğu kendiliğinden göstermez; uygun anı uygulama seçer (`shouldShowGuidance`).
+             */
+            showGuidance: async (options = {}) => {
+                var _a;
+                const message = options.message;
+                if (message !== undefined && message !== null && typeof message !== 'string') {
+                    throw new TypeError('Pushizo: message metin olmalı.');
+                }
+                const args = { setting: deliverySetting(options.setting) };
+                if (typeof message === 'string' && message.trim() !== '')
+                    args.message = message;
+                return Boolean((_a = (await this.bridge.call('deliveryShowGuidance', args))) === null || _a === void 0 ? void 0 : _a.opened);
+            },
         };
         // --- Live Activities (iOS) ---
         /**

@@ -309,6 +309,60 @@ export interface PlacementListOptions {
     /** 1-10 (varsayılan 1). */
     limit?: number;
 }
+/** Bildirim teslim riski (native Android `HsDeliveryRisk`). */
+export type DeliveryRisk = 'none' | 'elevated' | 'high';
+/**
+ * `Pushizo.Delivery.openSettings` / `showGuidance` ile açılabilen Android ayar ekranı: `auto` duruma en uygun ekran,
+ * `notifications` bildirim ayarları, `auto_start` üreticinin otomatik başlatma yöneticisi, `battery_optimization` pil
+ * optimizasyonu, `app_details` uygulama ayrıntıları.
+ */
+export type DeliverySetting = 'auto' | 'notifications' | 'auto_start' | 'battery_optimization' | 'app_details';
+/**
+ * Cihazın bildirim teslim durumu (`Pushizo.Delivery.status()`; native Android `HsDeliveryStatus`). Kişisel veri içermez.
+ * Yalnızca Android'de doludur: iOS'ta, web'de ve Android'de SDK başlatılmadan önce `supported` `false`, `risk` `none` ve
+ * `recommendedSettings` boştur.
+ */
+export interface DeliveryStatus {
+    /** Teşhis bu platformda okunabildi mi. */
+    supported: boolean;
+    /** `Build.MANUFACTURER` (küçük harf). */
+    manufacturer: string;
+    /** `Build.BRAND` (küçük harf). */
+    brand: string;
+    /** Üretici ailesi: `xiaomi`, `huawei`, `honor`, `oppo`, `realme`, `oneplus`, `vivo`, `samsung`, `meizu`, `asus`, `transsion`, `other`. */
+    vendor: string;
+    /** Üreticinin kendi pil/otomatik başlatma yöneticisi arka plandaki uygulamaları durdurabiliyor mu. */
+    aggressiveVendor: boolean;
+    /** ROM kimliği: `miui`, `hyperos`, `emui`, `harmonyos`, `magicos`, `coloros`, `oxygenos`, `realmeui`, `funtouchos`, `originos`, `oneui`, `flyme`, `android`. */
+    rom: string;
+    romVersion: string | null;
+    /** Bildirim izni verilmiş ve bildirimler açık mı. */
+    notificationsEnabled: boolean;
+    /** Varsayılan bildirim kanalı kullanıcı tarafından kapatılmış mı. */
+    channelBlocked: boolean;
+    /** Uygulama pil optimizasyonundan muaf mı. */
+    batteryOptimizationExempt: boolean;
+    /** Kullanıcı arka plan etkinliğini kısıtlamış mı. */
+    backgroundRestricted: boolean;
+    /** Bekleme kovası: `exempted`, `active`, `working_set`, `frequent`, `rare`, `restricted` (okunamadıysa null). */
+    standbyBucket: string | null;
+    /** Pil tasarrufu kipi açık mı. */
+    powerSaveMode: boolean;
+    /** Veri tasarrufu uygulamanın arka plan verisini engelliyor mu. */
+    dataSaverEnabled: boolean;
+    /** Sistem arka plan kısıtı: kullanıcı kısıtlamış ya da uygulama `rare`/`restricted` kovasında. */
+    restricted: boolean;
+    risk: DeliveryRisk;
+    /** Kullanıcının açması önerilen ayar ekranları (önem sırasıyla; öneri yoksa boş). */
+    recommendedSettings: DeliverySetting[];
+}
+/** `Pushizo.Delivery.showGuidance` seçenekleri. */
+export interface DeliveryGuidanceOptions {
+    /** Kullanıcı kabul edince açılacak ekran (varsayılan `auto`). */
+    setting?: DeliverySetting;
+    /** SDK'nın yerelleştirilmiş metni yerine gösterilecek açıklama. */
+    message?: string;
+}
 export interface ChatAttachment {
     id: string;
     name: string;

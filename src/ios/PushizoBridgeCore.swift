@@ -352,6 +352,11 @@ final class PushizoBridgeCore: NSObject {
             Pushizo.Location.setGeofencingEnabled(args["enabled"] as? Bool ?? false); ok()
         case "isGeofencingEnabled": ok(["enabled": Pushizo.Location.isGeofencingEnabled])
 
+        // Android teslimat güçlendirme (ADR-0092) iOS'ta yoktur: durum "desteklenmiyor", diğerleri etkisiz false.
+        case "deliveryStatus": ok(["supported": false])
+        case "deliveryShouldShowGuidance": ok(["show": false])
+        case "deliveryOpenSettings", "deliveryShowGuidance": ok(["opened": false])
+
         // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur.
         case "featureFlagsRefresh":
             Task {

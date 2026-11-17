@@ -74,6 +74,33 @@ describe('native sözleşme', () => {
     expect(swift).toContain('try Pushizo.updateUserJwt(jwt)');
   });
 
+  it('Android teslimat güçlendirme: native Pushizo.Delivery çağrılarına bağlı; iOS zararsız yanıt verir', () => {
+    for (const m of ['deliveryStatus', 'deliveryShouldShowGuidance', 'deliveryOpenSettings', 'deliveryShowGuidance']) {
+      expect(methods.has(m), m).toBe(true);
+    }
+    const kt = read('src/android/com/pushizo/cordova/PushizoBridgeCore.kt');
+    expect(kt).toContain('"deliveryStatus" -> reply.success(Pushizo.Delivery.status()?.toJson() ?: JSONObject().put("supported", false))');
+    expect(kt).toContain('Pushizo.Delivery.shouldShowGuidance(args.optInt("minIntervalDays", 14))');
+    expect(kt).toContain('Pushizo.Delivery.openSettings(activityProvider?.invoke() ?: context, deliverySetting(args.optStringOrNull("setting")))');
+    expect(kt).toContain('Pushizo.Delivery.showGuidance(activity, deliverySetting(args.optStringOrNull("setting")), args.optStringOrNull("message")) { opened ->');
+    // Activity yoksa diyalog gösterilmez; hata yerine false döner.
+    expect(kt).toContain('if (activity == null) reply.success(JSONObject().put("opened", false))');
+    // Köprü pil optimizasyonu iznini istemez (ADR-0092 §3).
+    expect(kt).not.toContain('REQUEST_IGNORE_BATTERY_OPTIMIZATIONS');
+    expect(read('src/android/com/pushizo/cordova/PushizoCordovaPlugin.kt')).toContain('core.activityProvider = { cordova.activity }');
+    // TS `DeliveryStatus` alanlarının tümü native JSON'da bulunur.
+    const defs = read('src/definitions.ts');
+    const fields = [...defs.slice(defs.indexOf('export interface DeliveryStatus {')).split('\n}')[0].matchAll(/^\s{2}([a-zA-Z]+): /gm)].map((m) => m[1]);
+    expect(fields).toHaveLength(17);
+    const json = kt.slice(kt.indexOf('fun HsDeliveryStatus.toJson()'), kt.indexOf('fun HsNotification.toJson()'));
+    for (const field of fields) expect(json.includes(`.put("${field}", `), field).toBe(true);
+
+    const swift = read('src/ios/PushizoBridgeCore.swift');
+    expect(swift).toContain('case "deliveryStatus": ok(["supported": false])');
+    expect(swift).toContain('case "deliveryShouldShowGuidance": ok(["show": false])');
+    expect(swift).toContain('case "deliveryOpenSettings", "deliveryShowGuidance": ok(["opened": false])');
+  });
+
   it('Live Activities iOS SDK çağrılarına bağlı, Android PLATFORM_NOT_SUPPORTED ile reddeder', () => {
     expect(methods.has('setupDefaultLiveActivity')).toBe(true);
     expect(methods.has('startDefaultLiveActivity')).toBe(true);

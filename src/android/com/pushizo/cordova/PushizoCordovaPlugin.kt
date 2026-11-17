@@ -24,6 +24,7 @@ class PushizoCordovaPlugin : CordovaPlugin() {
 
     override fun pluginInitialize() {
         core = PushizoBridgeCore(cordova.activity.applicationContext) { type, payload -> sendEvent(type, payload) }
+        core.activityProvider = { cordova.activity }
         core.attachIfInitialized()
     }
 

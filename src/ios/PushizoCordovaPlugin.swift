@@ -142,6 +142,10 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(isLocationShared:) func isLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setGeofencingEnabled:) func setGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(isGeofencingEnabled:) func isGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryStatus:) func deliveryStatus(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryShouldShowGuidance:) func deliveryShouldShowGuidance(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryOpenSettings:) func deliveryOpenSettings(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryShowGuidance:) func deliveryShowGuidance(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(featureFlagsRefresh:) func featureFlagsRefresh(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(featureFlagsIsEnabled:) func featureFlagsIsEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(featureFlagsGetValue:) func featureFlagsGetValue(_ command: CDVInvokedUrlCommand) { dispatch(command) }

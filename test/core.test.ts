@@ -166,6 +166,63 @@ describe('PushizoCore', () => {
     expect(f.calls.map((c) => c.method)).toEqual(['isLocationShared', 'requestLocationPermission']);
   });
 
+  it('Delivery.status: native durum aynen döner; tanınmayan ayar ekranı atlanır', async () => {
+    const native = {
+      supported: true, manufacturer: 'xiaomi', brand: 'redmi', vendor: 'xiaomi', aggressiveVendor: true, rom: 'hyperos', romVersion: '1.0.2.0',
+      notificationsEnabled: true, channelBlocked: false, batteryOptimizationExempt: false, backgroundRestricted: false, standbyBucket: 'rare',
+      powerSaveMode: true, dataSaverEnabled: false, restricted: true, risk: 'elevated',
+    };
+    const f = fakeBridge({ deliveryStatus: { ...native, recommendedSettings: ['auto_start', 'battery_optimization', 'gelecek_ekran'] } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Delivery.status()).toEqual({ ...native, recommendedSettings: ['auto_start', 'battery_optimization'] });
+    expect(f.calls).toEqual([{ method: 'deliveryStatus', args: undefined }]);
+  });
+
+  it('Delivery: iOS, web ve başlatılmamış SDK için desteklenmiyor / risk yok; çağrılar false döner', async () => {
+    for (const raw of [{ supported: false }, undefined, {}, { supported: false, risk: 'high', restricted: true, recommendedSettings: ['notifications'] }]) {
+      const hs = new PushizoCore(fakeBridge({ deliveryStatus: raw }).bridge);
+      expect(await hs.Delivery.status()).toEqual({
+        supported: false, manufacturer: '', brand: '', vendor: 'other', aggressiveVendor: false, rom: '', romVersion: null,
+        notificationsEnabled: true, channelBlocked: false, batteryOptimizationExempt: true, backgroundRestricted: false, standbyBucket: null,
+        powerSaveMode: false, dataSaverEnabled: false, restricted: false, risk: 'none', recommendedSettings: [],
+      });
+    }
+    const f = fakeBridge({ deliveryShouldShowGuidance: { show: false }, deliveryOpenSettings: { opened: false } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Delivery.shouldShowGuidance()).toBe(false);
+    expect(await hs.Delivery.openSettings()).toBe(false);
+    // Eksik yanıt false sayılır.
+    expect(await hs.Delivery.showGuidance()).toBe(false);
+  });
+
+  it('Delivery: argümanlar köprüye iletilir, geçersiz değer köprüye gitmeden reddedilir', async () => {
+    const f = fakeBridge({ deliveryShouldShowGuidance: { show: true }, deliveryOpenSettings: { opened: true }, deliveryShowGuidance: { opened: true } });
+    const hs = new PushizoCore(f.bridge);
+    expect(await hs.Delivery.shouldShowGuidance()).toBe(true);
+    expect(await hs.Delivery.shouldShowGuidance(30)).toBe(true);
+    expect(await hs.Delivery.openSettings()).toBe(true);
+    expect(await hs.Delivery.openSettings('auto_start')).toBe(true);
+    expect(await hs.Delivery.showGuidance()).toBe(true);
+    expect(await hs.Delivery.showGuidance({ setting: 'battery_optimization', message: 'Bildirimleri kaçırmayın' })).toBe(true);
+    // Boş açıklama gönderilmez; native SDK yerelleştirilmiş varsayılan metni kullanır.
+    expect(await hs.Delivery.showGuidance({ message: '   ' })).toBe(true);
+    expect(f.calls).toEqual([
+      { method: 'deliveryShouldShowGuidance', args: { minIntervalDays: 14 } },
+      { method: 'deliveryShouldShowGuidance', args: { minIntervalDays: 30 } },
+      { method: 'deliveryOpenSettings', args: { setting: 'auto' } },
+      { method: 'deliveryOpenSettings', args: { setting: 'auto_start' } },
+      { method: 'deliveryShowGuidance', args: { setting: 'auto' } },
+      { method: 'deliveryShowGuidance', args: { setting: 'battery_optimization', message: 'Bildirimleri kaçırmayın' } },
+      { method: 'deliveryShowGuidance', args: { setting: 'auto' } },
+    ]);
+    await expect(hs.Delivery.shouldShowGuidance(-1)).rejects.toThrow(/minIntervalDays/);
+    await expect(hs.Delivery.shouldShowGuidance(1.5)).rejects.toThrow(/minIntervalDays/);
+    await expect(hs.Delivery.openSettings('autoStart' as never)).rejects.toThrow(/setting/);
+    await expect(hs.Delivery.showGuidance({ setting: 'pil' as never })).rejects.toThrow(/setting/);
+    await expect(hs.Delivery.showGuidance({ message: 42 as never })).rejects.toThrow(/message metin olmalı/);
+    expect(f.calls).toHaveLength(7);
+  });
+
   it('tag/tetik değerleri metne çevrilir, null değerler atlanır, nesne reddedilir', async () => {
     const f = fakeBridge({ getTags: { tags: { plan: 'pro' } }, getTriggers: { triggers: { level: '3' } } });
     const hs = new PushizoCore(f.bridge);

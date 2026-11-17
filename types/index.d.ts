@@ -38,6 +38,10 @@ declare namespace Pushizo {
   type ContentCard = Definitions.ContentCard;
   type ContentCardFeed = Definitions.ContentCardFeed;
   type ContentCardType = Definitions.ContentCardType;
+  type DeliveryRisk = Definitions.DeliveryRisk;
+  type DeliverySetting = Definitions.DeliverySetting;
+  type DeliveryStatus = Definitions.DeliveryStatus;
+  type DeliveryGuidanceOptions = Definitions.DeliveryGuidanceOptions;
   type PreferenceChannel = Definitions.PreferenceChannel;
   type UserPreference = Definitions.UserPreference;
   type PreferenceCategory = Definitions.PreferenceCategory;

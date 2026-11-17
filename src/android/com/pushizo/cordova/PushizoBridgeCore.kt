@@ -24,6 +24,8 @@ import com.pushizo.sdk.HsInAppMessage
 import com.pushizo.sdk.HsInAppTrigger
 import com.pushizo.sdk.HsContentCard
 import com.pushizo.sdk.HsContentCardFeed
+import com.pushizo.sdk.HsDeliverySetting
+import com.pushizo.sdk.HsDeliveryStatus
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -54,6 +56,9 @@ internal class PushizoBridgeCore(
 
     /** JS tarafında ön plan dinleyicisi varsa gösterim JS kararına bırakılır. */
     @Volatile var foregroundHandlerEnabled = false
+
+    /** Köprünün etkin Activity'si (teslimat ayar ekranı ve açıklama diyaloğu için); köprü sınıfı atar, yoksa null döner. */
+    @Volatile var activityProvider: (() -> Activity?)? = null
 
     private val listenersRegistered = AtomicBoolean(false)
     private val foregroundSeq = AtomicLong(0)
@@ -334,6 +339,26 @@ internal class PushizoBridgeCore(
                 }
                 "isGeofencingEnabled" -> reply.success(JSONObject().put("enabled", Pushizo.Location.isGeofencingEnabled))
 
+                // Android teslimat güçlendirme (ADR-0092): teşhis, ayar ekranı adayları ve diyalog yerel SDK'dadır; çağrılar istisna atmaz.
+                "deliveryStatus" -> reply.success(Pushizo.Delivery.status()?.toJson() ?: JSONObject().put("supported", false))
+                "deliveryShouldShowGuidance" -> reply.success(
+                    JSONObject().put(
+                        "show",
+                        if (args.has("minIntervalDays")) Pushizo.Delivery.shouldShowGuidance(args.optInt("minIntervalDays", 14)) else Pushizo.Delivery.shouldShowGuidance(),
+                    ),
+                )
+                "deliveryOpenSettings" -> reply.success(
+                    JSONObject().put("opened", Pushizo.Delivery.openSettings(activityProvider?.invoke() ?: context, deliverySetting(args.optStringOrNull("setting")))),
+                )
+                "deliveryShowGuidance" -> {
+                    // Diyalog etkin bir Activity ister; yoksa hiçbir şey gösterilmez ve false döner.
+                    val activity = activityProvider?.invoke()
+                    if (activity == null) reply.success(JSONObject().put("opened", false))
+                    else Pushizo.Delivery.showGuidance(activity, deliverySetting(args.optStringOrNull("setting")), args.optStringOrNull("message")) { opened ->
+                        reply.success(JSONObject().put("opened", opened))
+                    }
+                }
+
                 // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur; `refresh` geri çağrısı arka plan iş parçacığındadır.
                 "featureFlagsRefresh" -> Pushizo.FeatureFlags.refresh { ok -> reply.success(JSONObject().put("success", ok)) }
                 "featureFlagsIsEnabled" -> reply.success(
@@ -453,6 +478,30 @@ internal class PushizoBridgeCore(
             "debug" -> HsLog.Level.DEBUG
             else -> HsLog.Level.WARN
         }
+
+        /** JS değeri (`auto`, `notifications`, `auto_start`, `battery_optimization`, `app_details`); tanınmayan değer `AUTO`. */
+        fun deliverySetting(wire: String?): HsDeliverySetting =
+            HsDeliverySetting.values().firstOrNull { it.name.equals(wire, ignoreCase = true) } ?: HsDeliverySetting.AUTO
+
+        /** Teslim durumu (ADR-0092); enum değerleri küçük harfle (`risk`: none/elevated/high, ayarlar: `auto_start` …). */
+        fun HsDeliveryStatus.toJson(): JSONObject = JSONObject()
+            .put("supported", true)
+            .put("manufacturer", manufacturer)
+            .put("brand", brand)
+            .put("vendor", vendor.id)
+            .put("aggressiveVendor", vendor.aggressive)
+            .put("rom", rom)
+            .put("romVersion", romVersion.orNull())
+            .put("notificationsEnabled", notificationsEnabled)
+            .put("channelBlocked", channelBlocked)
+            .put("batteryOptimizationExempt", batteryOptimizationExempt)
+            .put("backgroundRestricted", backgroundRestricted)
+            .put("standbyBucket", standbyBucket?.id.orNull())
+            .put("powerSaveMode", powerSaveMode)
+            .put("dataSaverEnabled", dataSaverEnabled)
+            .put("restricted", restricted)
+            .put("risk", risk.name.lowercase())
+            .put("recommendedSettings", JSONArray(recommendedSettings.map { it.name.lowercase() }))
 
         fun HsNotification.toJson(): JSONObject = JSONObject()
             .put("title", title.orNull())
