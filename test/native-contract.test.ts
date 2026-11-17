@@ -308,11 +308,11 @@ describe('native sözleşme', () => {
     expect(read('src/android/com/pushizo/cordova/PushizoCordovaPlugin.kt')).toContain('else -> return core.handle(action, args.optJSONObject(0) ?: JSONObject(), reply(callbackContext))');
   });
 
-  it('yerel SDK bağımlılıkları bayrak/yerleşim/bölge izleme sunan sürümlerde (Android 0.2.1, iOS 0.2)', () => {
+  it('yerel SDK bağımlılıkları bayrak/yerleşim/bölge izleme sunan sürümlerde (Android 0.3.0, iOS 0.2)', () => {
     const xml = read('plugin.xml');
-    expect(xml).toContain('<framework src="com.pushizo:pushizo-android:0.2.1" />');
-    expect(xml).toContain('<pod name="Pushizo" spec="~> 0.2" />');
-    expect((JSON.parse(read('package.json')) as { version: string }).version).toBe('0.2.0');
+    expect(xml).toContain('<framework src="com.pushizo:pushizo-android:0.3.0" />');
+    expect(xml).toContain('<pod name="Pushizo" spec="~> 0.3" />');
+    expect((JSON.parse(read('package.json')) as { version: string }).version).toBe('0.3.0');
   });
 
   it('plugin.xml dosya başvuruları mevcut', () => {

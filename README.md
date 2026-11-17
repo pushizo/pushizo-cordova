@@ -408,10 +408,10 @@ ve carousel bloklarını çıkarır.
 </platform>
 ```
 
-   Köprü Kotlin ile yazıldığından `GradlePluginKotlinEnabled` zorunludur. Yerel SDK 0.2.1'in `androidx.work` bağımlılığı
+   Köprü Kotlin ile yazıldığından `GradlePluginKotlinEnabled` zorunludur. Yerel SDK 0.3.0'in `androidx.work` bağımlılığı
    `compileSdk` 35 ister; cordova-android 13'ün varsayılanı 34 olduğundan `android-compileSdkVersion` tercihi gerekir.
 2. Pushizo dashboard'unda Firebase servis hesabı JSON'unu yükleyin (kurulum sihirbazında **Cordova** seçilebilir); kayıt sonrası otomatik doğrulanır.
-3. Eklenti `com.pushizo:pushizo-android:0.2.1` artefaktına bağlıdır (özellik bayrakları, yerleşimler ve bölge izleme bu sürümle gelir). Maven Central yayınına kadar `sdk/android` içinde `gradle :pushizo:publishToMavenLocal` çalıştırın; eklenti `mavenLocal()` deposunu ekler.
+3. Eklenti `com.pushizo:pushizo-android:0.3.0` artefaktına bağlıdır (özellik bayrakları, yerleşimler ve bölge izleme bu sürümle gelir). Maven Central yayınına kadar `sdk/android` içinde `gradle :pushizo:publishToMavenLocal` çalıştırın; eklenti `mavenLocal()` deposunu ekler.
 4. FCM servisi, `POST_NOTIFICATIONS` izni ve bildirim Activity'si SDK manifestinden birleşir. Bildirim ikonu için `AndroidManifest.xml` içinde `com.pushizo.sdk.default_notification_icon` meta-data'sı verilebilir.
 
 Eklenti, JS ile yapılan `initialize` ayarlarını (yalnızca uygulama kimliği ve herkese açık ayarlar) saklar; süreç bildirim tıklaması veya FCM mesajıyla yeniden başladığında SDK WebView yüklenmeden başlatılır.
