@@ -3,7 +3,7 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
         id="cordova-plugin-pushizo"
-        version="0.1.0">
+        version="0.3.0">
     <name>Pushizo</name>
     <description>Push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Pushizo)</description>
     <license>MIT</license>
@@ -53,7 +53,7 @@
         <source-file src="src/android/com/pushizo/cordova/PushizoInitProvider.kt" target-dir="app/src/main/kotlin/com/pushizo/cordova" />
 
         <framework src="src/android/pushizo.gradle" custom="true" type="gradleReference" />
-        <framework src="com.pushizo:pushizo-android:0.1.0" />
+        <framework src="com.pushizo:pushizo-android:0.3.0" />
     </platform>
 
     <platform name="ios">
@@ -89,7 +89,7 @@
             </config>
             <pods use-frameworks="true">
                 <!-- Monorepo/yerel geliştirme: platforms/ios/Podfile içinde :path => '<repo>/sdk/ios' (README). -->
-                <pod name="Pushizo" spec="~> 0.1.0" />
+                <pod name="Pushizo" spec="~> 0.3" />
             </pods>
         </podspec>
     </platform>

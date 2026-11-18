@@ -3,20 +3,36 @@ package com.pushizo.cordova
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import com.pushizo.sdk.Pushizo
 import com.pushizo.sdk.HsApiException
 import com.pushizo.sdk.HsCallback
+import com.pushizo.sdk.HsChatActivity
 import com.pushizo.sdk.HsChatEventAdapter
 import com.pushizo.sdk.HsChatOpenListener
 import com.pushizo.sdk.HsClickEvent
+import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
+import com.pushizo.sdk.HsInAppAction
+import com.pushizo.sdk.HsInAppBlock
+import com.pushizo.sdk.HsInAppCarouselCard
 import com.pushizo.sdk.HsInAppClickEvent
+import com.pushizo.sdk.HsInAppDisplay
 import com.pushizo.sdk.HsInAppLifecycleEvent
 import com.pushizo.sdk.HsInAppLifecycleListener
+import com.pushizo.sdk.HsInAppMessage
+import com.pushizo.sdk.HsInAppTrigger
+import com.pushizo.sdk.HsContentCard
+import com.pushizo.sdk.HsContentCardFeed
+import com.pushizo.sdk.HsDeliverySetting
+import com.pushizo.sdk.HsDeliveryStatus
+import com.pushizo.sdk.HsFeatureFlagObserver
 import com.pushizo.sdk.HsInboxItem
+import com.pushizo.sdk.HsInboxObserver
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsMessageCategory
@@ -25,8 +41,11 @@ import com.pushizo.sdk.HsPreference
 import com.pushizo.sdk.HsPreferenceInput
 import com.pushizo.sdk.HsPreferencesResult
 import com.pushizo.sdk.HsPushSubscriptionState
+import com.pushizo.sdk.HsUserProfile
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -47,12 +66,20 @@ internal class PushizoBridgeCore(
     /** JS tarafında ön plan dinleyicisi varsa gösterim JS kararına bırakılır. */
     @Volatile var foregroundHandlerEnabled = false
 
+    /** Köprünün etkin Activity'si (teslimat ayar ekranı ve açıklama diyaloğu için); köprü sınıfı atar, yoksa null döner. */
+    @Volatile var activityProvider: (() -> Activity?)? = null
+
     private val listenersRegistered = AtomicBoolean(false)
     private val foregroundSeq = AtomicLong(0)
 
     /** Karar bekleyen ön plan bildirimleri; en eski kayıtlar düşürülür (sınırlı bellek). */
     private val pendingForeground = object : LinkedHashMap<String, HsForegroundEvent>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, HsForegroundEvent>?): Boolean = size > MAX_PENDING_FOREGROUND
+    }
+
+    /** Son `placementsList` yanıtlarındaki mesajlar (kimliğe göre); raporlar bu nesnelerle yapılır, en eski kayıtlar düşürülür. */
+    private val placementMessages = object : LinkedHashMap<String, HsInAppMessage>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, HsInAppMessage>?): Boolean = size > MAX_PLACEMENT_CACHE
     }
 
     private val clickListener: (HsClickEvent) -> Unit = { e ->
@@ -88,6 +115,39 @@ internal class PushizoBridgeCore(
     /** Sohbet bildirimine tıklama → JS `chatOpen` (cephe dinleyici yoksa bekletir). */
     private val chatOpenListener = HsChatOpenListener { info -> emit("chatOpen", JSONObject(info.toMap())) }
 
+    /** Özellik bayrakları sunucudan yenilendi → JS `featureFlagsChange` (yerel SDK ana iş parçacığında çağırır). */
+    private val featureFlagObserver = HsFeatureFlagObserver { emit("featureFlagsChange", JSONObject()) }
+
+    /** Bildirim kutusu değişti → JS `inboxChange` (`{ type, itemId, unreadCount }`; `itemId` tek öğe olayları dışında null). */
+    private val inboxObserver = HsInboxObserver { event -> emit("inboxChange", JSONObject(event.toMap())) }
+
+    /**
+     * Açık hazır sohbet ekranları. Yerel SDK ekranın açık olup olmadığını dışa açmadığından (`Chat.hide()` yalnızca
+     * kapatır) köprü `HsChatActivity` yaşam döngüsünü izler; kayıtlar zayıf tutulur.
+     */
+    private val chatScreens: MutableSet<Activity> = Collections.newSetFromMap(WeakHashMap())
+
+    private val chatScreenTracker = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+            if (activity is HsChatActivity) synchronized(chatScreens) { chatScreens.add(activity) }
+        }
+        override fun onActivityDestroyed(activity: Activity) {
+            if (activity is HsChatActivity) synchronized(chatScreens) { chatScreens.remove(activity) }
+        }
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+    }
+
+    init {
+        (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(chatScreenTracker)
+    }
+
+    /** `Chat.show()` ile açılan sohbet ekranı açık mı (kapanmakta olan ekran sayılmaz). */
+    private fun isChatPresented(): Boolean = synchronized(chatScreens) { chatScreens.any { !it.isFinishing && !it.isDestroyed } }
+
     private val inAppLifecycleListener = object : HsInAppLifecycleListener {
         private fun send(event: String, e: HsInAppLifecycleEvent) =
             emit("inAppLifecycle", JSONObject().put("event", event).put("message", JSONObject().put("id", e.message.id)))
@@ -113,9 +173,12 @@ internal class PushizoBridgeCore(
         Pushizo.InAppMessages.addLifecycleListener(inAppLifecycleListener)
         Pushizo.Chat.addListener(chatListener)
         Pushizo.Chat.addOpenListener(chatOpenListener)
+        Pushizo.FeatureFlags.addObserver(featureFlagObserver)
+        Pushizo.Inbox.addObserver(inboxObserver)
     }
 
     fun detach() {
+        (context.applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(chatScreenTracker)
         if (!listenersRegistered.compareAndSet(true, false)) return
         Pushizo.Notifications.removeClickListener(clickListener)
         Pushizo.Notifications.removeForegroundLifecycleListener(foregroundListener)
@@ -125,6 +188,8 @@ internal class PushizoBridgeCore(
         Pushizo.InAppMessages.removeLifecycleListener(inAppLifecycleListener)
         Pushizo.Chat.removeListener(chatListener)
         Pushizo.Chat.removeOpenListener(chatOpenListener)
+        Pushizo.FeatureFlags.removeObserver(featureFlagObserver)
+        Pushizo.Inbox.removeObserver(inboxObserver)
         // Bekleyen ön plan bildirimleri kaybolmasın diye gösterilir.
         val pending = synchronized(pendingForeground) { pendingForeground.values.toList().also { pendingForeground.clear() } }
         pending.forEach { it.display() }
@@ -190,8 +255,69 @@ internal class PushizoBridgeCore(
 
     fun locationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.permissionGranted)
 
+    /**
+     * Arka plan konum izni akışı (bölge izleme, ADR-0065): Android SDK'nın `Location.requestBackgroundPermission` sonucu
+     * geri çağrıyla bildirilmediğinden köprü aynı adımları kendi izin mekanizmasıyla yürütür. İzin zaten varsa true.
+     * Android 10 öncesinde arka plan izni ayrı değildir: normal konum izinleri istenir. Android 10+ için uygulama
+     * manifest'inde `ACCESS_BACKGROUND_LOCATION` yoksa veya Activity yoksa false. Değilse açıklama diyaloğu gösterilir;
+     * "Şimdi değil"/iptal false döner, "Devam" ise [requestSystem] ile sistem izni istenir (Android 11+ Ayarlar ekranı
+     * açılır) — sonuç geldiğinde köprü [onBackgroundLocationPermissionResult] yanıtını döndürür.
+     */
+    fun requestBackgroundLocationPermission(activity: Activity?, args: JSONObject, reply: Reply, requestSystem: (Array<String>) -> Unit) {
+        if (!Pushizo.isInitialized) {
+            reply.error("NOT_READY", NOT_INITIALIZED)
+            return
+        }
+        if (Pushizo.Location.backgroundPermissionGranted) {
+            reply.success(onBackgroundLocationPermissionResult())
+            return
+        }
+        val legacy = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        val permissions = if (legacy) declaredLocationPermissions() else declaredPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        if (permissions.isEmpty()) {
+            HsLog.w(
+                if (legacy) "konum izni istenemedi: uygulama manifest'inde ACCESS_COARSE_LOCATION/ACCESS_FINE_LOCATION yok"
+                else "arka plan konum izni istenemedi: uygulama manifest'inde ACCESS_BACKGROUND_LOCATION yok",
+            )
+            reply.success(backgroundLocationPermissionJson())
+            return
+        }
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            HsLog.w("arka plan konum izni istenemedi: etkin Activity yok")
+            reply.success(backgroundLocationPermissionJson())
+            return
+        }
+        val rationale = args.optStringOrNull("rationale")?.takeIf { it.isNotBlank() }
+        val title = if (legacy) com.pushizo.sdk.R.string.hs_location_rationale_title else com.pushizo.sdk.R.string.hs_geofence_rationale_title
+        val message = if (legacy) com.pushizo.sdk.R.string.hs_location_rationale_message else com.pushizo.sdk.R.string.hs_geofence_rationale_message
+        activity.runOnUiThread {
+            if (activity.isFinishing || activity.isDestroyed) {
+                reply.success(backgroundLocationPermissionJson())
+                return@runOnUiThread
+            }
+            AlertDialog.Builder(activity)
+                .setTitle(title)
+                .setMessage(rationale ?: activity.getString(message))
+                .setPositiveButton(com.pushizo.sdk.R.string.hs_location_rationale_continue) { _, _ -> requestSystem(permissions) }
+                .setNegativeButton(com.pushizo.sdk.R.string.hs_location_rationale_not_now) { _, _ -> reply.success(backgroundLocationPermissionJson()) }
+                .setOnCancelListener { reply.success(backgroundLocationPermissionJson()) }
+                .show()
+        }
+    }
+
+    /** Sistem izin sonucu: SDK bilgilendirilir (bölge izleme açıksa bölgeler yenilenir), güncel arka plan izni döner. */
+    fun onBackgroundLocationPermissionResult(): JSONObject {
+        Pushizo.Location.onPermissionResult()
+        return backgroundLocationPermissionJson()
+    }
+
+    fun backgroundLocationPermissionJson(): JSONObject = JSONObject().put("permission", Pushizo.Location.backgroundPermissionGranted)
+
     /** Uygulama manifest'inde tanımlı konum izinleri (eklenti izinleri otomatik eklemez; README "Konum"). */
-    private fun declaredLocationPermissions(): Array<String> {
+    private fun declaredLocationPermissions(): Array<String> = declaredPermissions(LOCATION_PERMISSIONS)
+
+    /** [candidates] içinden uygulama manifest'inde tanımlı olanlar. */
+    private fun declaredPermissions(candidates: Array<String>): Array<String> {
         val requested = try {
             val pm = context.packageManager
             val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -204,12 +330,12 @@ internal class PushizoBridgeCore(
         } catch (e: PackageManager.NameNotFoundException) {
             emptySet()
         }
-        return LOCATION_PERMISSIONS.filter { it in requested }.toTypedArray()
+        return candidates.filter { it in requested }.toTypedArray()
     }
 
     /**
-     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission` ve `requestLocationPermission` Activity
-     * gerektirdiğinden köprü sınıfında ele alınır.
+     * Metodu çalıştırır. Bilinmeyen metotta false döner. `requestPermission`, `requestLocationPermission` ve
+     * `requestBackgroundLocationPermission` Activity gerektirdiğinden köprü sınıfında ele alınır.
      */
     fun handle(method: String, args: JSONObject, reply: Reply): Boolean {
         try {
@@ -228,8 +354,25 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "setConsentGiven" -> { Pushizo.setConsentGiven(args.optBoolean("given", false)); reply.success(null) }
+                "isInitialized" -> reply.success(JSONObject().put("initialized", Pushizo.isInitialized))
                 "login" -> {
-                    Pushizo.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    // Profil (isteğe bağlı): geçersiz e-posta/telefon yerel SDK'da girişten önce reddedilir (INVALID_ARGUMENT).
+                    val profile = args.optJSONObject("profile")
+                    if (profile == null) {
+                        Pushizo.login(args.requireString("externalId"), args.optStringOrNull("identityHash"), args.optStringOrNull("jwt"))
+                    } else {
+                        Pushizo.login(
+                            args.requireString("externalId"),
+                            HsUserProfile(
+                                email = profile.optStringOrNull("email"),
+                                sms = profile.optStringOrNull("sms"),
+                                tags = profile.stringMap("tags"),
+                                aliases = profile.stringMap("aliases"),
+                            ),
+                            args.optStringOrNull("identityHash"),
+                            args.optStringOrNull("jwt"),
+                        )
+                    }
                     reply.success(null)
                 }
                 "updateUserJwt" -> { Pushizo.updateUserJwt(args.requireString("jwt")); reply.success(null) }
@@ -241,6 +384,11 @@ internal class PushizoBridgeCore(
                 "addAliases" -> { Pushizo.User.addAliases(args.stringMap("aliases")); reply.success(null) }
                 "removeAlias" -> { Pushizo.User.removeAlias(args.requireString("label")); reply.success(null) }
                 "setLanguage" -> { Pushizo.User.setLanguage(args.requireString("code")); reply.success(null) }
+                // Kullanıcı özelliği: JSON null özelliği siler; nesne/dizi yerel SDK'da kuyruk JSON'una çevrilir. Boş anahtar → INVALID_ARGUMENT.
+                "setUserProperty" -> {
+                    Pushizo.User.setProperty(args.requireString("key"), args.opt("value")?.takeUnless { it == JSONObject.NULL })
+                    reply.success(null)
+                }
                 // Geçersiz adres → IllegalArgumentException → INVALID_ARGUMENT
                 "addEmail" -> { Pushizo.User.addEmail(args.requireString("email")); reply.success(null) }
                 "removeEmail" -> { Pushizo.User.removeEmail(args.requireString("email")); reply.success(null) }
@@ -253,6 +401,13 @@ internal class PushizoBridgeCore(
                 // Tercihler (ADR-0019 §4): sahiplik kanıtı yerel SDK'da eklenir; doğrulama hatası INVALID_ARGUMENT, abonelik yoksa NOT_READY.
                 "getPreferences" -> Pushizo.User.getPreferences(callback(reply) { it.toJson() })
                 "setPreferences" -> Pushizo.User.setPreferences(args.preferenceInputs("preferences"), callback(reply) { it.toJson() })
+                // Reklam kişiselleştirme rızası (ADR-0037): tercih ucundaki ayrılmış `ads_personalization` anahtarı.
+                "setAdsPersonalizationConsent" -> Pushizo.User.setAdsPersonalizationConsent(args.optBoolean("granted", false), callback(reply) { it.toJson() })
+                "getConsents" -> Pushizo.User.getConsents(callback(reply) { list -> JSONObject().put("consents", JSONArray(list.map { it.toJson() })) })
+                // Fire OS ADM kayıt kimliği; geçersiz kimlik → IllegalArgumentException → INVALID_ARGUMENT.
+                "registerAdm" -> { Pushizo.User.registerAdm(args.requireString("token")); reply.success(null) }
+                // Reklam kimliği (GAID): null veya sıfır kimlik sunucudaki kaydı siler.
+                "setAdvertisingId" -> { Pushizo.Ads.setAdvertisingId(args.optStringOrNull("id")); reply.success(null) }
 
                 "getPushSubscription" -> reply.success(Pushizo.User.pushSubscription.state.toJson())
                 "optIn" -> { Pushizo.User.pushSubscription.optIn(); reply.success(null) }
@@ -271,6 +426,9 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "removeGroupedNotifications" -> { Pushizo.Notifications.removeGroupedNotifications(args.requireString("group")); reply.success(null) }
+                // Rozet: yerel SDK sayıyı saklar ve sonraki bildirimlere yazar; `success` rozetin bu cihazda gösterilebildiğini bildirir.
+                "setBadgeCount" -> reply.success(JSONObject().put("success", Pushizo.Notifications.setBadgeCount(args.optInt("count", 0))))
+                "getBadgeCount" -> reply.success(JSONObject().put("count", Pushizo.Notifications.badgeCount))
                 "setForegroundHandlerEnabled" -> { foregroundHandlerEnabled = args.optBoolean("enabled", false); reply.success(null) }
                 "displayNotification" -> {
                     val id = args.requireString("notificationId")
@@ -285,7 +443,11 @@ internal class PushizoBridgeCore(
 
                 "sendEvent" -> {
                     val value = if (args.has("value") && !args.isNull("value")) args.getDouble("value") else null
-                    Pushizo.Session.sendEvent(args.requireString("name"), args.optJSONObject("properties")?.toMap() ?: emptyMap(), value)
+                    val name = args.requireString("name")
+                    val properties = args.optJSONObject("properties")?.toMap() ?: emptyMap()
+                    // Tekilleştirme kimliği (isteğe bağlı): biçim geçersizse yerel SDK kendi kimliğini üretir.
+                    val eventId = args.optStringOrNull("eventId")
+                    if (eventId == null) Pushizo.Session.sendEvent(name, properties, value) else Pushizo.Session.sendEvent(name, properties, value, eventId)
                     reply.success(null)
                 }
                 "setLogLevel" -> { Pushizo.Debug.setLogLevel(logLevel(args.optStringOrNull("level"))); reply.success(null) }
@@ -303,6 +465,8 @@ internal class PushizoBridgeCore(
                 "inboxMarkAllRead" -> Pushizo.Inbox.markAllRead(callback(reply) { JSONObject().put("unreadCount", it) })
                 "inboxArchive" -> Pushizo.Inbox.archive(args.requireString("id"), callback(reply) { null })
                 "inboxUnreadCount" -> Pushizo.Inbox.unreadCount(callback(reply) { JSONObject().put("unreadCount", it) })
+                "contentCardsList" -> Pushizo.ContentCards.list(args.optInt("limit", 50), callback(reply) { it.toJson() })
+                "contentCardEvent" -> contentCardEvent(args.requireString("id"), args.optStringOrNull("event"), reply)
 
                 // Konum (v2 Faz 17b): izin isteği Activity gerektirdiğinden köprü sınıfında ele alınır.
                 "setLocationShared" -> {
@@ -311,6 +475,58 @@ internal class PushizoBridgeCore(
                     reply.success(null)
                 }
                 "isLocationShared" -> reply.success(JSONObject().put("shared", Pushizo.Location.isShared))
+                "getLocationPermission" -> reply.success(
+                    JSONObject().put("permission", Pushizo.Location.permissionGranted).put("background", Pushizo.Location.backgroundPermissionGranted),
+                )
+                // Arka plan bölge izleme (ADR-0065): varsayılan kapalı; köprü izin istemez, manifest'e izin eklemez.
+                "setGeofencingEnabled" -> {
+                    check(Pushizo.isInitialized) { NOT_INITIALIZED }
+                    Pushizo.Location.setGeofencingEnabled(args.optBoolean("enabled", false))
+                    reply.success(null)
+                }
+                "isGeofencingEnabled" -> reply.success(JSONObject().put("enabled", Pushizo.Location.isGeofencingEnabled))
+
+                // Android teslimat güçlendirme (ADR-0092): teşhis, ayar ekranı adayları ve diyalog yerel SDK'dadır; çağrılar istisna atmaz.
+                "deliveryStatus" -> reply.success(Pushizo.Delivery.status()?.toJson() ?: JSONObject().put("supported", false))
+                "deliveryShouldShowGuidance" -> reply.success(
+                    JSONObject().put(
+                        "show",
+                        if (args.has("minIntervalDays")) Pushizo.Delivery.shouldShowGuidance(args.optInt("minIntervalDays", 14)) else Pushizo.Delivery.shouldShowGuidance(),
+                    ),
+                )
+                "deliveryOpenSettings" -> reply.success(
+                    JSONObject().put("opened", Pushizo.Delivery.openSettings(activityProvider?.invoke() ?: context, deliverySetting(args.optStringOrNull("setting")))),
+                )
+                "deliveryShowGuidance" -> {
+                    // Diyalog etkin bir Activity ister; yoksa hiçbir şey gösterilmez ve false döner.
+                    val activity = activityProvider?.invoke()
+                    if (activity == null) reply.success(JSONObject().put("opened", false))
+                    else Pushizo.Delivery.showGuidance(activity, deliverySetting(args.optStringOrNull("setting")), args.optStringOrNull("message")) { opened ->
+                        reply.success(JSONObject().put("opened", opened))
+                    }
+                }
+
+                // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur; `refresh` geri çağrısı arka plan iş parçacığındadır.
+                "featureFlagsRefresh" -> Pushizo.FeatureFlags.refresh { ok -> reply.success(JSONObject().put("success", ok)) }
+                "featureFlagsIsEnabled" -> reply.success(
+                    JSONObject().put("enabled", Pushizo.FeatureFlags.isEnabled(args.requireString("key"), args.optBoolean("defaultValue", false))),
+                )
+                "featureFlagsGetValue" -> reply.success(JSONObject().put("value", Pushizo.FeatureFlags.getValue(args.requireString("key")).orNull()))
+
+                // Gömülü yerleşimler (ADR-0068): anahtar ve limit denetimi yerel SDK'dadır (IllegalArgumentException → INVALID_ARGUMENT).
+                "placementsList" -> Pushizo.Placements.list(args.requireString("key"), args.optInt("limit", 1)) { messages ->
+                    synchronized(placementMessages) {
+                        messages.forEach { placementMessages.remove(it.id); placementMessages[it.id] = it }
+                    }
+                    reply.success(JSONObject().put("messages", JSONArray(messages.map { it.toBridgeJson() })))
+                }
+                "placementsReportImpression" -> { placementMessage(args)?.let { Pushizo.Placements.reportImpression(it) }; reply.success(null) }
+                "placementsReportClick" -> {
+                    val buttonId = args.requireString("buttonId")
+                    placementMessage(args)?.let { Pushizo.Placements.reportClick(it, buttonId) }
+                    reply.success(null)
+                }
+                "placementsReportDismiss" -> { placementMessage(args)?.let { Pushizo.Placements.reportDismiss(it) }; reply.success(null) }
 
                 // Live Activities yalnızca iOS'ta vardır (ADR-0024); Android'de sessizce başarılı dönülmez.
                 "setupDefaultLiveActivity" -> reply.error(LIVE_ACTIVITY_UNSUPPORTED_CODE, LIVE_ACTIVITY_UNSUPPORTED_MESSAGE)
@@ -348,6 +564,15 @@ internal class PushizoBridgeCore(
                     JSONObject().put("url", Pushizo.Chat.attachmentUrl(args.requireString("attachmentId"), args.optBoolean("download", false))),
                 )
                 "chatGetVisitorId" -> reply.success(JSONObject().put("visitorId", Pushizo.Chat.visitorId.orNull()))
+                "chatIsListening" -> reply.success(JSONObject().put("listening", Pushizo.Chat.isListening))
+                // Hazır sohbet ekranı (`HsChatActivity`): etkin Activity varsa onun üzerinden, yoksa uygulama bağlamıyla açılır.
+                "chatShow" -> {
+                    check(Pushizo.isInitialized) { NOT_INITIALIZED }
+                    Pushizo.Chat.show(activityProvider?.invoke() ?: context)
+                    reply.success(null)
+                }
+                "chatHide" -> { Pushizo.Chat.hide(); reply.success(null) }
+                "chatIsPresented" -> reply.success(JSONObject().put("presented", isChatPresented()))
                 else -> return false
             }
         } catch (e: IllegalArgumentException) {
@@ -360,7 +585,25 @@ internal class PushizoBridgeCore(
         return true
     }
 
+    /** Rapor için mesajı son `placementsList` yanıtlarından bulur; bulunamazsa yok sayılır (yalnızca debug log). */
+    private fun placementMessage(args: JSONObject): HsInAppMessage? {
+        val id = args.requireString("id")
+        return synchronized(placementMessages) { placementMessages[id] } ?: run {
+            HsLog.d("yerleşim mesajı bulunamadı: $id")
+            null
+        }
+    }
+
     /** SDK geri çağrısını köprü yanıtına çevirir; API hatasında sunucu kodu korunur. */
+    // Kart olayı (ADR-0082): olay adı yerel SDK çağrısına eşlenir; bilinmeyen olay INVALID_ARGUMENT.
+    private fun contentCardEvent(id: String, event: String?, reply: Reply) {
+        val cb = callback<HsContentCard>(reply) { it.toJson() }
+        if (event == "impression") Pushizo.ContentCards.logImpression(id, cb)
+        else if (event == "click") Pushizo.ContentCards.logClick(id, cb)
+        else if (event == "dismiss") Pushizo.ContentCards.dismiss(id, cb)
+        else reply.error("INVALID_ARGUMENT", "Kart olayı impression, click veya dismiss olmalı.")
+    }
+
     private fun <T> callback(reply: Reply, map: (T) -> JSONObject?) = HsCallback<T> { result ->
         result.fold(
             onSuccess = { reply.success(map(it)) },
@@ -378,6 +621,7 @@ internal class PushizoBridgeCore(
 
     companion object {
         private const val MAX_PENDING_FOREGROUND = 32
+        private const val MAX_PLACEMENT_CACHE = 50
         private const val NOT_INITIALIZED = "Önce Pushizo.initialize çağrılmalı"
         private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         private const val LIVE_ACTIVITY_UNSUPPORTED_CODE = "PLATFORM_NOT_SUPPORTED"
@@ -390,6 +634,30 @@ internal class PushizoBridgeCore(
             "debug" -> HsLog.Level.DEBUG
             else -> HsLog.Level.WARN
         }
+
+        /** JS değeri (`auto`, `notifications`, `auto_start`, `battery_optimization`, `app_details`); tanınmayan değer `AUTO`. */
+        fun deliverySetting(wire: String?): HsDeliverySetting =
+            HsDeliverySetting.values().firstOrNull { it.name.equals(wire, ignoreCase = true) } ?: HsDeliverySetting.AUTO
+
+        /** Teslim durumu (ADR-0092); enum değerleri küçük harfle (`risk`: none/elevated/high, ayarlar: `auto_start` …). */
+        fun HsDeliveryStatus.toJson(): JSONObject = JSONObject()
+            .put("supported", true)
+            .put("manufacturer", manufacturer)
+            .put("brand", brand)
+            .put("vendor", vendor.id)
+            .put("aggressiveVendor", vendor.aggressive)
+            .put("rom", rom)
+            .put("romVersion", romVersion.orNull())
+            .put("notificationsEnabled", notificationsEnabled)
+            .put("channelBlocked", channelBlocked)
+            .put("batteryOptimizationExempt", batteryOptimizationExempt)
+            .put("backgroundRestricted", backgroundRestricted)
+            .put("standbyBucket", standbyBucket?.id.orNull())
+            .put("powerSaveMode", powerSaveMode)
+            .put("dataSaverEnabled", dataSaverEnabled)
+            .put("restricted", restricted)
+            .put("risk", risk.name.lowercase())
+            .put("recommendedSettings", JSONArray(recommendedSettings.map { it.name.lowercase() }))
 
         fun HsNotification.toJson(): JSONObject = JSONObject()
             .put("title", title.orNull())
@@ -421,6 +689,27 @@ internal class PushizoBridgeCore(
             .put("expiresAt", expiresAt.orNull())
             .put("createdAt", createdAt.orNull())
 
+        fun HsContentCard.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("messageId", messageId.orNull())
+            .put("type", type.wire)
+            .put("title", title.orNull())
+            .put("body", body.orNull())
+            .put("url", url.orNull())
+            .put("imageUrl", imageUrl.orNull())
+            .put("buttonText", buttonText.orNull())
+            .put("data", JSONObject(data))
+            .put("pinned", pinned)
+            .put("priority", priority)
+            .put("viewed", viewed)
+            .put("clicked", clicked)
+            .put("expiresAt", expiresAt.orNull())
+            .put("createdAt", createdAt.orNull())
+
+        fun HsContentCardFeed.toJson(): JSONObject = JSONObject()
+            .put("cards", JSONArray(cards.map { it.toJson() }))
+            .put("unviewedCount", unviewedCount)
+
         fun HsInboxPage.toJson(): JSONObject = JSONObject()
             .put("items", JSONArray(items.map { it.toJson() }))
             .put("unreadCount", unreadCount)
@@ -442,9 +731,83 @@ internal class PushizoBridgeCore(
             .put("channels", channels?.let { JSONArray(it) }.orNull())
             .put("defaultOptedIn", defaultOptedIn)
 
+        /** Rıza kaydı (ADR-0037); `updatedAt` epoch milisaniye. */
+        fun HsConsent.toJson(): JSONObject = JSONObject()
+            .put("purpose", purpose)
+            .put("granted", granted)
+            .put("source", source.orNull())
+            .put("updatedAt", updatedAt.orNull())
+
         fun HsPreferencesResult.toJson(): JSONObject = JSONObject()
             .put("preferences", JSONArray(preferences.map { it.toJson() }))
             .put("categories", JSONArray(categories.map { it.toJson() }))
+
+        // In-app mesaj modeli → JS `InAppMessage` (alanlar yerel modelle aynı; zamanlar epoch milisaniye).
+        fun HsInAppMessage.toBridgeJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("priority", priority)
+            .put("triggers", JSONArray(triggers.map { it.toJson() }))
+            .put("triggerGroups", JSONArray(triggerGroups.map { group -> JSONArray(group.map { it.toJson() }) }))
+            .put("variantId", variantId.orNull())
+            .put("display", display.toJson())
+            .put("remainingImpressions", remainingImpressions)
+            .put("minIntervalSeconds", minIntervalSeconds)
+            .put("stopAfterInteraction", stopAfterInteraction)
+            .put("lastImpressionAt", lastImpressionAt.orNull())
+            .put("endAt", endAt.orNull())
+            .put("language", language.orNull())
+
+        fun HsInAppDisplay.toJson(): JSONObject = JSONObject()
+            .put("layout", layout.wire)
+            .put("backgroundColor", backgroundColor.orNull())
+            .put("textColor", textColor.orNull())
+            .put("dismissible", dismissible)
+            .put("autoDismissSeconds", autoDismissSeconds.orNull())
+            .put("contentType", contentType.wire)
+            .put("blocks", JSONArray(blocks.map { it.toJson() }))
+            .put("html", html.orNull())
+            .put("htmlHeight", htmlHeight.orNull())
+
+        fun HsInAppTrigger.toJson(): JSONObject = when (this) {
+            HsInAppTrigger.SessionStart -> JSONObject().put("kind", "session_start")
+            is HsInAppTrigger.Event -> JSONObject().put("kind", "event").put("name", name)
+            is HsInAppTrigger.Screen -> JSONObject().put("kind", "screen").put("name", name)
+            is HsInAppTrigger.Condition -> JSONObject().put("kind", "trigger").put("key", key).put("op", op).put("value", value.orNull())
+            is HsInAppTrigger.SessionDuration -> JSONObject().put("kind", "session_duration").put("seconds", seconds)
+            is HsInAppTrigger.Unsupported -> JSONObject().put("kind", "unsupported").put("name", kind)
+        }
+
+        fun HsInAppAction.toJson(): JSONObject = when (this) {
+            HsInAppAction.Dismiss -> JSONObject().put("type", "dismiss")
+            is HsInAppAction.Url -> JSONObject().put("type", "url").put("url", url)
+            is HsInAppAction.Deeplink -> JSONObject().put("type", "deeplink").put("url", url)
+            is HsInAppAction.Tags -> JSONObject().put("type", "tags").put("tags", JSONObject(tags))
+            HsInAppAction.PushPrompt -> JSONObject().put("type", "push_prompt")
+            is HsInAppAction.Outcome -> JSONObject().put("type", "outcome").put("name", name).put("value", value.orNull())
+        }
+
+        fun HsInAppBlock.Button.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("text", text)
+            .put("action", action.toJson())
+            .put("backgroundColor", backgroundColor.orNull())
+            .put("textColor", textColor.orNull())
+
+        fun HsInAppCarouselCard.toJson(): JSONObject = JSONObject()
+            .put("id", id)
+            .put("title", title)
+            .put("body", body.orNull())
+            .put("imageUrl", imageUrl.orNull())
+            .put("imageAlt", imageAlt.orNull())
+            .put("button", button?.toJson().orNull())
+
+        fun HsInAppBlock.toJson(): JSONObject = when (this) {
+            is HsInAppBlock.Image -> JSONObject().put("type", "image").put("url", url).put("alt", alt.orNull())
+            is HsInAppBlock.Title -> JSONObject().put("type", "title").put("text", text)
+            is HsInAppBlock.Body -> JSONObject().put("type", "body").put("text", text)
+            is HsInAppBlock.Button -> toJson().put("type", "button")
+            is HsInAppBlock.Carousel -> JSONObject().put("type", "carousel").put("id", id).put("cards", JSONArray(cards.map { it.toJson() }))
+        }
 
         /** JS `{ category, channel, optedIn }[]` → SDK girdisi; kural denetimi (1-100, kanal) SDK'dadır. */
         fun JSONObject.preferenceInputs(key: String): List<HsPreferenceInput> {

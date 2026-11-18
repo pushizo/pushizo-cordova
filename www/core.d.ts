@@ -1,6 +1,6 @@
-import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppTriggerValue, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PreferenceInput, PushSubscriptionState, UserPreferences } from './definitions';
+import type { ChatAttachmentOptions, ChatAttachmentSource, ChatConfig, ChatConversationState, ChatEventMap, ChatIdentifyResult, ChatMessage, ChatMessagePage, ChatMessagesOptions, ChatStartOptions, FeatureFlagValue, ForegroundWillDisplayEvent, PushizoNotification, InAppClickEvent, InAppLifecycleListener, InAppMessage, InAppTriggerValue, ContentCard, ContentCardFeed, DeliveryGuidanceOptions, DeliverySetting, DeliveryStatus, InboxChangeEvent, InboxItem, InboxListOptions, InboxPage, InitializeOptions, LiveActivityValue, LogLevel, LoginOptions, NotificationClickEvent, PermissionChangeEvent, PlacementListOptions, PreferenceInput, PushSubscriptionState, SendEventOptions, UserConsent, UserPreferences, UserPropertyValue } from './definitions';
 /** Native katmandan gelen olay adları. */
-export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen';
+export type BridgeEventType = 'click' | 'foregroundWillDisplay' | 'pushSubscriptionChange' | 'permissionChange' | 'inAppClick' | 'inAppLifecycle' | 'chatEvent' | 'chatOpen' | 'featureFlagsChange' | 'inboxChange';
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
 export interface Bridge {
     call<T = void>(method: string, args?: Record<string, unknown>): Promise<T>;
@@ -21,6 +21,8 @@ export declare class PushizoCore {
     private readonly permissionObservers;
     private readonly inAppClickListeners;
     private readonly inAppLifecycleListeners;
+    private readonly featureFlagObservers;
+    private readonly inboxObservers;
     /** Dinleyici yokken gelen tıklamalar (soğuk başlatma); ilk dinleyiciye teslim edilir. */
     private readonly pendingClicks;
     /** Canlı sohbet dinleyicileri (tür başına). */
@@ -43,11 +45,15 @@ export declare class PushizoCore {
     private listen;
     /** SDK'yı başlatır; olay aboneliği burada kurulur. */
     initialize(appIdOrOptions: string | InitializeOptions, options?: Omit<InitializeOptions, 'appId'>): Promise<void>;
+    /** Native SDK başlatıldı mı (`initialize` tamamlandı ya da süreç saklanan yapılandırmayla erkenden başlatıldı). */
+    isInitialized: () => Promise<boolean>;
     /** KVKK/GDPR onayı (`requiresPrivacyConsent: true` ile başlatıldıysa). */
     setConsentGiven(given: boolean): Promise<void>;
     /**
      * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
-     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+     * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`. `profile` verilirse e-posta, SMS,
+     * etiket ve takma adlar aynı çağrıda ayarlanır: `login(id, { profile: { email: 'ali@ornek.com' } })`; geçersiz
+     * e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir (yarım kalmış kimlik değişimi olmaz).
      */
     login(externalId: string, proof?: string | LoginOptions): Promise<void>;
     /** Süresi dolan kimlik JWT'sini yeniler (giriş yapmış kullanıcı için); sonraki SDK istekleri yeni belirteci taşır. */
@@ -61,6 +67,11 @@ export declare class PushizoCore {
         removeTags: (keys: string[]) => Promise<void>;
         getTags: () => Promise<Record<string, string>>;
         setLanguage: (code: string) => Promise<void>;
+        /**
+         * Kullanıcı özelliği yazar (ör. `setProperty('plan', 'pro')`); `null` özelliği siler. Değer metin, sayı, mantıksal ya da
+         * bunların dizisi/düz nesnesi olabilir; anahtar 1-64 karakterdir. Çevrimdışıyken yerel SDK kuyruğunda bekler.
+         */
+        setProperty: (key: string, value: UserPropertyValue) => Promise<void>;
         addAlias: (label: string, id: string) => Promise<void>;
         addAliases: (aliases: Record<string, string>) => Promise<void>;
         removeAlias: (label: string) => Promise<void>;
@@ -81,6 +92,18 @@ export declare class PushizoCore {
         getPreferences: () => Promise<UserPreferences>;
         /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
         setPreferences: (preferences: PreferenceInput[]) => Promise<UserPreferences>;
+        /**
+         * Reklam kişiselleştirme rızası (ADR-0037): `true` iken kullanıcının e-posta/telefon özeti app'in bağladığı reklam
+         * platformu kitlelerine gönderilebilir; `false` rızayı geri alır. Güncel tercih listesini döndürür.
+         */
+        setAdsPersonalizationConsent: (granted: boolean) => Promise<UserPreferences>;
+        /** Rıza kayıtları (`ads_personalization` …). Abonelik henüz yoksa `NOT_READY` koduyla reddedilir. */
+        getConsents: () => Promise<UserConsent[]>;
+        /**
+         * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). ADM kaydını kendisi yapan
+         * uygulamalar içindir. iOS ve web'de etkisizdir.
+         */
+        registerAdm: (token: string) => Promise<void>;
         pushSubscription: {
             getState: () => Promise<PushSubscriptionState>;
             getId: () => Promise<string | null>;
@@ -107,6 +130,20 @@ export declare class PushizoCore {
         removeNotification: (id: number | string) => Promise<void>;
         /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
         removeGroupedNotifications: (group: string) => Promise<void>;
+        /**
+         * Uygulama rozetini ayarlar; rozet bu cihazda gösterilebiliyorsa true döner. iOS: rozet ve bildirim uzantısıyla
+         * paylaşılan sayaç ayarlanır (her zaman true). Android: başlatıcı rozeti için "sayıyı ayarla" API'si yoktur; yerel SDK
+         * sayıyı saklar ve sonraki bildirimlere yazar (Android 8 öncesinde, bildirimler ya da kanal rozeti kapalıyken false).
+         * Web: App Badging API (yüklü PWA); tarayıcı desteklemiyorsa false.
+         */
+        setBadgeCount: (count: number) => Promise<boolean>;
+        /** Rozeti sıfırlar (`setBadgeCount(0)`); sonuç `setBadgeCount` ile aynıdır. */
+        clearBadge: () => Promise<boolean>;
+        /**
+         * Güncel rozet sayısı. Android: `setBadgeCount` ile saklanan son sayı; iOS: uygulama simgesindeki rozet; web: bu
+         * oturumda `setBadgeCount` ile başarıyla ayarlanan son sayı (tarayıcı rozeti okutmaz).
+         */
+        getBadgeCount: () => Promise<number>;
         /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
         addClickListener: (cb: Listener<NotificationClickEvent>) => (() => void);
         removeClickListener: (cb: Listener<NotificationClickEvent>) => void;
@@ -117,9 +154,15 @@ export declare class PushizoCore {
         addPermissionObserver: (cb: Listener<PermissionChangeEvent>) => (() => void);
         removePermissionObserver: (cb: Listener<PermissionChangeEvent>) => void;
     };
+    /** Rozet çağrısı; yanıt vermeyen (eski) native katman başarılı sayılır. */
+    private badge;
     readonly Session: {
-        /** Özel olay / outcome; in-app olay tetiklerini de değerlendirir. */
-        sendEvent: (name: string, properties?: Record<string, unknown>, value?: number) => Promise<void>;
+        /**
+         * Özel olay / outcome; in-app olay tetiklerini de değerlendirir. `options.eventId` tekilleştirme kimliğidir
+         * (8-64 karakter; harf, rakam ve `. _ : -`): reklam pikseliyle aynı kimlik verilirse sunucu olayı tekilleşir
+         * (ADR-0038). Biçim geçersizse yerel SDK kendi kimliğini üretir.
+         */
+        sendEvent: (name: string, properties?: Record<string, unknown>, value?: number, options?: SendEventOptions) => Promise<void>;
     };
     readonly InAppMessages: {
         addTrigger: (key: string, value: InAppTriggerValue) => Promise<void>;
@@ -147,10 +190,28 @@ export declare class PushizoCore {
         /** Öğeyi kutudan kaldırır (sunucuda arşivlenir). */
         archive: (id: string) => Promise<void>;
         unreadCount: () => Promise<number>;
+        /**
+         * Kutu değişim gözlemcisi (rozet güncellemek için): `read`/`read_all`/`archived` her işlemde, `listed`/`count`
+         * yalnızca okunmamış sayısı değiştiğinde bildirilir. Dönen fonksiyon aboneliği kaldırır.
+         */
+        addObserver: (cb: Listener<InboxChangeEvent>) => (() => void);
+        removeObserver: (cb: Listener<InboxChangeEvent>) => void;
     };
+    readonly ContentCards: {
+        /** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı; `limit` 1-100 (varsayılan 50). */
+        list: (limit?: number) => Promise<ContentCardFeed>;
+        /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+        logImpression: (id: string) => Promise<ContentCard>;
+        /** Karta tıklandı (gösterim de sayılır). */
+        logClick: (id: string) => Promise<ContentCard>;
+        /** Kart kapatıldı; akıştan kalkar. */
+        dismiss: (id: string) => Promise<ContentCard>;
+    };
+    private cardEvent;
     /**
      * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
-     * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.
+     * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir. Hazır
+     * arayüz için `show()` / `hide()`; kendi arayüzünüz için diğer çağrılar ve olaylar.
      */
     readonly Chat: {
         /** Sohbeti etkinleştirir ve ziyaretçiyi bağlar (giriş yapmış kullanıcı, push aboneliği); konuşma varsa döner. */
@@ -186,8 +247,19 @@ export declare class PushizoCore {
         stopListening: () => Promise<void>;
         /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
         attachmentUrl: (attachmentId: string, download?: boolean) => Promise<string>;
+        /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). */
+        isListening: () => Promise<boolean>;
         /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
         getVisitorId: () => Promise<string | null>;
+        /**
+         * Hazır sohbet ekranını açar (Android `HsChatActivity`, iOS `HSChatViewController` modal; web: Web SDK sohbet
+         * widget'ı açık pencereyle). Ekran zaten açıksa yenisi açılmaz. `initialize` öncesinde `NOT_READY` ile reddedilir.
+         */
+        show: () => Promise<void>;
+        /** `show` ile açılan sohbet ekranını kapatır (açık değilse hiçbir şey yapmaz). */
+        hide: () => Promise<void>;
+        /** `show` ile açılan sohbet ekranı şu an açık mı. */
+        isPresented: () => Promise<boolean>;
         /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
         addEventListener: <K extends keyof ChatEventMap>(event: K, listener: Listener<ChatEventMap[K]>) => (() => void);
         removeEventListener: <K extends keyof ChatEventMap>(event: K, listener: Listener<ChatEventMap[K]>) => void;
@@ -196,11 +268,41 @@ export declare class PushizoCore {
     private onChatEvent;
     private onChatOpen;
     /**
-     * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
-     * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
-     * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
-     * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
-     * reddedilir (web: Web SDK hatası).
+     * Özellik bayrakları: değerler native SDK'da oturum başında yenilenir ve cihazda saklanır; ağ yoksa son değer, hiç
+     * alınmadıysa verilen varsayılan döner. Gizlilik onayı beklenirken istek gönderilmez.
+     */
+    readonly FeatureFlags: {
+        /** Değerleri sunucudan hemen yeniler; yeni değerler alındıysa true (hata son değerleri korur). */
+        refresh: () => Promise<boolean>;
+        /** Bayrak bu kullanıcı için açık mı; değer henüz yoksa `defaultValue`. */
+        isEnabled: (key: string, defaultValue?: boolean) => Promise<boolean>;
+        /** Bayrağın değeri (metin, sayı, mantıksal, nesne veya dizi); değer yoksa `defaultValue`. */
+        getValue: <T extends FeatureFlagValue = FeatureFlagValue>(key: string, defaultValue?: T | null) => Promise<T | null>;
+        /**
+         * Bayrak değerleri sunucudan her yenilendiğinde (oturum başı ve `refresh()`) çağrılır; güncel değerler `isEnabled` /
+         * `getValue` ile okunur. Dönen fonksiyon aboneliği kaldırır.
+         */
+        addObserver: (cb: () => void) => (() => void);
+        removeObserver: (cb: () => void) => void;
+    };
+    /**
+     * Gömülü yerleşimler: uygulamanın ayırdığı alana içerik. Model döner, çizim uygulamanındır; içerik ekrana gelince
+     * `reportImpression`, düğme tıklanınca `reportClick`, kapatılınca `reportDismiss` çağrılır.
+     */
+    readonly Placements: {
+        /** Alanın içeriği (`limit` 1-10, varsayılan 1). Abonelik yoksa veya gizlilik onayı bekleniyorsa boş döner. */
+        list: (key: string, options?: PlacementListOptions) => Promise<InAppMessage[]>;
+        /** Raporlar `list` ile alınmış mesaj içindir; native katmanın tanımadığı mesaj yok sayılır. */
+        reportImpression: (message: Pick<InAppMessage, "id">) => Promise<void>;
+        reportClick: (message: Pick<InAppMessage, "id">, buttonId: string) => Promise<void>;
+        reportDismiss: (message: Pick<InAppMessage, "id">) => Promise<void>;
+    };
+    /**
+     * Konum paylaşımı (yalnızca ön plan; arka planda koordinat toplanmaz, bölge izleme için `setGeofencingEnabled`).
+     * Paylaşım açıkken native SDK konumu oturum başında ve uygulama ön plana döndüğünde en sık 5 dakikada bir push
+     * aboneliğine yazar; izin yoksa veya gizlilik onayı verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık
+     * rıza kaydı sayılır; `setShared(false)` konumu ve rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde
+     * `setShared`/`requestPermission`/`setGeofencingEnabled` `NOT_READY` ile reddedilir (web: Web SDK hatası).
      */
     readonly Location: {
         /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
@@ -216,6 +318,62 @@ export declare class PushizoCore {
          * açılmaz. Sonuç: izin varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false.
          */
         requestPermission: (rationale?: string) => Promise<boolean>;
+        /**
+         * Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"; web: tarayıcı konum
+         * izninin son bilinen durumu). İstem açmaz.
+         */
+        permissionGranted: () => Promise<boolean>;
+        /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
+        backgroundPermissionGranted: () => Promise<boolean>;
+        /**
+         * Arka plan konum iznini ister (bölge izleme için). Android: açıklama diyaloğu (`rationale`; verilmezse SDK metni),
+         * ardından `ACCESS_BACKGROUND_LOCATION` (Android 11+ sistem Ayarlar ekranını açar; önce ön plan konum izni verilmiş
+         * olmalı). iOS: "her zaman" izni (`rationale` yok sayılır; önce "kullanırken" izni verilmiş olmalı). Sonuç: izin
+         * varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false. Web'de false.
+         */
+        requestBackgroundPermission: (rationale?: string) => Promise<boolean>;
+        /** `requestBackgroundPermission` ile aynı izin (iOS adı: "her zaman"); iki ad da her platformda çalışır. */
+        requestAlwaysPermission: () => Promise<boolean>;
+        /**
+         * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
+         * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir (`requestBackgroundPermission`);
+         * köprü manifest/Info.plist'e izin eklemez.
+         */
+        setGeofencingEnabled: (enabled: boolean) => Promise<void>;
+        /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
+        isGeofencingEnabled: () => Promise<boolean>;
+    };
+    /**
+     * Mobil reklam kimliği (Android GAID, iOS IDFA). SDK reklam kitaplığı ve izin istemi içermez: kimliği uygulama alır
+     * (Android `AdvertisingIdClient`, iOS App Tracking Transparency izninden sonra `ASIdentifierManager`) ve buraya verir.
+     * Kimlik reklam kitlesine yalnızca `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle gider.
+     */
+    readonly Ads: {
+        /** Reklam kimliğini yazar; `null` veya sıfır kimlik sunucudaki kaydı siler. Web'de etkisizdir. */
+        setAdvertisingId: (id: string | null) => Promise<void>;
+    };
+    /**
+     * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu
+     * için bildirimler gecikir ya da gelmez. Bu yüzey cihazdaki kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+     * Yalnızca Android'de etkilidir: iOS ve web'de `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile
+     * `showGuidance` hiçbir şey yapmadan `false` döner.
+     */
+    readonly Delivery: {
+        /** Cihazın teslim durumu: üretici, ROM, pil muafiyeti, arka plan kısıtı, risk ve önerilen ayar ekranları. */
+        status: () => Promise<DeliveryStatus>;
+        /** Hazır açıklama diyaloğu şimdi gösterilmeli mi: teslim riski var ve diyalog son `minIntervalDays` günde gösterilmedi. */
+        shouldShowGuidance: (minIntervalDays?: number) => Promise<boolean>;
+        /**
+         * Ayar ekranını açar (`auto`: duruma en uygun ekran). Üreticiye özgü ekran bulunamazsa standart Android ekranına
+         * düşülür. Bir ekran açıldıysa true.
+         */
+        openSettings: (setting?: DeliverySetting) => Promise<boolean>;
+        /**
+         * Hazır açıklama diyaloğunu gösterir (22 dil; `message` verilirse SDK metni yerine o gösterilir). Kullanıcı kabul
+         * ederse `setting` ekranı açılır. Ayar ekranı açıldıysa true; kullanıcı vazgeçtiyse, ekran açılamadıysa ya da etkin
+         * Activity yoksa false. SDK diyaloğu kendiliğinden göstermez; uygun anı uygulama seçer (`shouldShowGuidance`).
+         */
+        showGuidance: (options?: DeliveryGuidanceOptions) => Promise<boolean>;
     };
     /**
      * iOS Live Activities (ADR-0024; iOS 16.1+). Köprü genel `PushizoDefaultLiveActivityAttributes` türünü kullanır;

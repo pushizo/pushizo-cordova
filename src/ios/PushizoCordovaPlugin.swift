@@ -134,10 +134,25 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(inboxMarkAllRead:) func inboxMarkAllRead(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxArchive:) func inboxArchive(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(inboxUnreadCount:) func inboxUnreadCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(contentCardsList:) func contentCardsList(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(contentCardEvent:) func contentCardEvent(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setupDefaultLiveActivity:) func setupDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(startDefaultLiveActivity:) func startDefaultLiveActivity(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(setLocationShared:) func setLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(isLocationShared:) func isLocationShared(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setGeofencingEnabled:) func setGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(isGeofencingEnabled:) func isGeofencingEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryStatus:) func deliveryStatus(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryShouldShowGuidance:) func deliveryShouldShowGuidance(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryOpenSettings:) func deliveryOpenSettings(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(deliveryShowGuidance:) func deliveryShowGuidance(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsRefresh:) func featureFlagsRefresh(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsIsEnabled:) func featureFlagsIsEnabled(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(featureFlagsGetValue:) func featureFlagsGetValue(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsList:) func placementsList(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportImpression:) func placementsReportImpression(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportClick:) func placementsReportClick(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(placementsReportDismiss:) func placementsReportDismiss(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatStart:) func chatStart(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetConfig:) func chatGetConfig(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetConversation:) func chatGetConversation(_ command: CDVInvokedUrlCommand) { dispatch(command) }
@@ -154,4 +169,18 @@ class PushizoCordovaPlugin: CDVPlugin {
     @objc(chatAttachmentUrl:) func chatAttachmentUrl(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(chatGetVisitorId:) func chatGetVisitorId(_ command: CDVInvokedUrlCommand) { dispatch(command) }
     @objc(requestLocationPermission:) func requestLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(isInitialized:) func isInitialized(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setAdsPersonalizationConsent:) func setAdsPersonalizationConsent(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getConsents:) func getConsents(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(registerAdm:) func registerAdm(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setAdvertisingId:) func setAdvertisingId(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setBadgeCount:) func setBadgeCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getLocationPermission:) func getLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(requestBackgroundLocationPermission:) func requestBackgroundLocationPermission(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatIsListening:) func chatIsListening(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatShow:) func chatShow(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatHide:) func chatHide(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(chatIsPresented:) func chatIsPresented(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(setUserProperty:) func setUserProperty(_ command: CDVInvokedUrlCommand) { dispatch(command) }
+    @objc(getBadgeCount:) func getBadgeCount(_ command: CDVInvokedUrlCommand) { dispatch(command) }
 }

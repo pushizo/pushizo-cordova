@@ -55,6 +55,7 @@ final class PushizoBridgeCore: NSObject {
     fileprivate static weak var active: PushizoBridgeCore?
     private static var listenersRegistered = false
     private static let maxPendingForeground = 32
+    private static let maxPlacementCache = 50
     private static let notInitialized = "Önce Pushizo.initialize çağrılmalı"
 
     private let emit: (String, [String: Any]) -> Void
@@ -63,6 +64,9 @@ final class PushizoBridgeCore: NSObject {
     private var foregroundSeq = 0
     private var pendingForeground: [String: HSForegroundEvent] = [:]
     private var pendingOrder: [String] = []
+    /// Son `placementsList` yanıtlarındaki mesajlar (kimliğe göre); raporlar bu nesnelerle yapılır, en eski kayıtlar düşürülür.
+    private var placementMessages: [String: HSInAppMessage] = [:]
+    private var placementOrder: [String] = []
     private let lock = NSLock()
 
     init(emit: @escaping (String, [String: Any]) -> Void) {
@@ -112,6 +116,14 @@ final class PushizoBridgeCore: NSObject {
         Pushizo.Chat.addOpenListener { info in
             Self.active?.emit("chatOpen", info.dictionary)
         }
+        // Özellik bayrakları yenilendi → JS `featureFlagsChange`; bildirim kutusu değişti → `inboxChange`
+        // (`{ type, itemId?, unreadCount }`). Yerel SDK ikisini de ana iş parçacığında çağırır.
+        Pushizo.FeatureFlags.addObserver {
+            Self.active?.emit("featureFlagsChange", [:])
+        }
+        Pushizo.Inbox.addObserver { event in
+            Self.active?.emit("inboxChange", event.dictionary)
+        }
     }
 
     private func onForeground(_ event: HSForegroundEvent) {
@@ -138,6 +150,30 @@ final class PushizoBridgeCore: NSObject {
         defer { lock.unlock() }
         pendingOrder.removeAll { $0 == id }
         return pendingForeground.removeValue(forKey: id)
+    }
+
+    private func rememberPlacements(_ messages: [HSInAppMessage]) {
+        lock.lock()
+        defer { lock.unlock() }
+        for message in messages {
+            placementOrder.removeAll { $0 == message.id }
+            placementMessages[message.id] = message
+            placementOrder.append(message.id)
+        }
+        while placementOrder.count > Self.maxPlacementCache {
+            placementMessages.removeValue(forKey: placementOrder.removeFirst())
+        }
+    }
+
+    /// Rapor için mesajı son `placementsList` yanıtlarından bulur; bulunamazsa yok sayılır (yalnızca debug log).
+    private func placementMessage(_ id: String) -> HSInAppMessage? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let message = placementMessages[id] else {
+            if HSLog.level.rawValue >= HSLog.Level.debug.rawValue { print("[Pushizo] yerleşim mesajı bulunamadı: \(id)") }
+            return nil
+        }
+        return message
     }
 
     fileprivate func emitLifecycle(_ event: String, _ message: HSInAppMessage) {
@@ -173,6 +209,7 @@ final class PushizoBridgeCore: NSObject {
             config.initializeSdk()
             registerListeners()
             ok()
+        case "isInitialized": ok(["initialized": Pushizo.isInitialized])
         case "setConsentGiven": Pushizo.setConsentGiven(args["given"] as? Bool ?? false); ok()
         case "login":
             guard let externalId = string("externalId") else { invalid("externalId gerekli"); return true }
@@ -181,7 +218,21 @@ final class PushizoBridgeCore: NSObject {
             if let message = Pushizo.loginProofError(identityHash: identityHash, jwt: jwt) {
                 reply(.failure(code: "NOT_READY", message: message)); return true
             }
-            Pushizo.login(externalId, identityHash: identityHash, jwt: jwt); ok()
+            guard let profile = args["profile"] as? [String: Any] else {
+                Pushizo.login(externalId, identityHash: identityHash, jwt: jwt); ok(); return true
+            }
+            // Profil (isteğe bağlı): yerel `login(_:profile:identityHash:jwt:)` e-posta, telefon ve takma adları girişten önce
+            // doğrular (yarım kalmış kimlik değişimi olmaz), profil işlemlerini girişten sonra kuyruğa yazar.
+            let userProfile = HSUserProfile(email: Self.nonBlank(profile["email"]), sms: Self.nonBlank(profile["sms"]),
+                                            tags: Self.stringMap(profile["tags"]), aliases: Self.stringMap(profile["aliases"]))
+            do {
+                try Pushizo.login(externalId, profile: userProfile, identityHash: identityHash, jwt: jwt)
+                ok()
+            } catch HSError.invalidArgument(let message) {
+                invalid(message)
+            } catch {
+                reply(.failure(code: "NOT_READY", message: Self.notInitialized))
+            }
         case "updateUserJwt":
             guard let jwt = string("jwt") else { invalid("jwt gerekli"); return true }
             do {
@@ -201,6 +252,10 @@ final class PushizoBridgeCore: NSObject {
         case "setLanguage":
             guard let code = string("code") else { invalid("code gerekli"); return true }
             Pushizo.User.setLanguage(code); ok()
+        // Kullanıcı özelliği: `null` (NSNull) özelliği siler; desteklenmeyen değer yerel SDK'da günlüğe yazılıp yok sayılır.
+        case "setUserProperty":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            Pushizo.User.setProperty(key, args["value"]); ok()
         case "addEmail", "removeEmail":
             let email = args["email"] as? String ?? ""
             guard HSContacts.normalizeEmail(email) != nil else { invalid("Geçersiz e-posta adresi."); return true }
@@ -224,6 +279,16 @@ final class PushizoBridgeCore: NSObject {
                 HSPreferenceInput(category: $0["category"] as? String ?? "", channel: $0["channel"] as? String, optedIn: $0["optedIn"] as? Bool ?? false)
             }
             inbox(reply) { Self.map(try await Pushizo.User.setPreferences(inputs)) }
+        // Reklam kişiselleştirme rızası (ADR-0037): tercih ucundaki ayrılmış `ads_personalization` anahtarı.
+        case "setAdsPersonalizationConsent":
+            let granted = args["granted"] as? Bool ?? false
+            inbox(reply) { Self.map(try await Pushizo.User.setAdsPersonalizationConsent(granted)) }
+        case "getConsents":
+            inbox(reply) { ["consents": try await Pushizo.User.getConsents().map { Self.map($0) }] }
+        // Fire OS ADM yalnızca Android'dedir: iOS'ta etkisiz, hata yok.
+        case "registerAdm": ok()
+        // Reklam kimliği (IDFA): nil veya sıfır kimlik sunucudaki kaydı siler.
+        case "setAdvertisingId": Pushizo.Ads.setAdvertisingId(string("id")); ok()
 
         case "getPushSubscription":
             Task {
@@ -252,6 +317,13 @@ final class PushizoBridgeCore: NSObject {
         case "removeGroupedNotifications":
             guard let group = string("group") else { invalid("group gerekli"); return true }
             Pushizo.Notifications.removeGroupedNotifications(group); ok()
+        // Uygulama rozeti; bildirim uzantısıyla paylaşılan sayaç da eşitlenir (0 rozeti sıfırlar).
+        case "setBadgeCount":
+            guard let count = (args["count"] as? NSNumber)?.intValue, count >= 0 else { invalid("count negatif olmayan tam sayı olmalı"); return true }
+            Pushizo.Notifications.setBadgeCount(count); ok(["success": true])
+        // Uygulama simgesindeki güncel rozet (UIKit; ana iş parçacığında okunur).
+        case "getBadgeCount":
+            DispatchQueue.main.async { ok(["count": UIApplication.shared.applicationIconBadgeNumber]) }
         case "setForegroundHandlerEnabled": foregroundHandlerEnabled = args["enabled"] as? Bool ?? false; ok()
         case "displayNotification":
             guard let id = string("notificationId") else { invalid("notificationId gerekli"); return true }
@@ -264,7 +336,9 @@ final class PushizoBridgeCore: NSObject {
 
         case "sendEvent":
             guard let name = string("name") else { invalid("name gerekli"); return true }
-            Pushizo.Session.sendEvent(name, properties: args["properties"] as? [String: Any] ?? [:], value: (args["value"] as? NSNumber)?.doubleValue)
+            // `eventId` (isteğe bağlı) tekilleştirme kimliğidir; biçim geçersizse yerel SDK kendi kimliğini üretir.
+            Pushizo.Session.sendEvent(name, properties: args["properties"] as? [String: Any] ?? [:],
+                                      value: (args["value"] as? NSNumber)?.doubleValue, eventId: string("eventId"))
             ok()
         case "setLogLevel": Pushizo.Debug.setLogLevel(Self.logLevel(args["level"] as? String)); ok()
 
@@ -291,6 +365,24 @@ final class PushizoBridgeCore: NSObject {
         case "inboxUnreadCount":
             inbox(reply) { ["unreadCount": try await Pushizo.Inbox.unreadCount()] }
 
+        // İçerik kartları (ADR-0082).
+        case "contentCardsList":
+            let limit = (args["limit"] as? NSNumber)?.intValue ?? 50
+            inbox(reply) { Self.map(try await Pushizo.ContentCards.list(limit: limit)) }
+        case "contentCardEvent":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            let event = string("event")
+            guard event == "impression" || event == "click" || event == "dismiss" else {
+                invalid("Kart olayı impression, click veya dismiss olmalı"); return true
+            }
+            inbox(reply) {
+                let card: HSContentCard
+                if event == "impression" { card = try await Pushizo.ContentCards.logImpression(id) }
+                else if event == "click" { card = try await Pushizo.ContentCards.logClick(id) }
+                else { card = try await Pushizo.ContentCards.dismiss(id) }
+                return Self.map(card)
+            }
+
         // Konum (v2 Faz 17b; yalnızca ön plan): yerel SDK başlatılmadan çağrılırsa sessizce yok sayılmaz, NOT_READY döner.
         case "setLocationShared":
             guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
@@ -300,6 +392,58 @@ final class PushizoBridgeCore: NSObject {
             guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
             // Açıklama uyarısı + `requestWhenInUseAuthorization`; sonuç ana iş parçacığında döner.
             Pushizo.Location.requestPermission(rationale: string("rationale")) { granted in ok(["permission": granted]) }
+        // İzin durumu yerel SDK'dan okunur ("kullanırken" veya "her zaman" = ön plan, "her zaman" = arka plan); istem açmaz.
+        case "getLocationPermission":
+            ok(["permission": Pushizo.Location.permissionGranted, "background": Pushizo.Location.backgroundPermissionGranted])
+        case "requestBackgroundLocationPermission":
+            guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            // "Her zaman" izni (Android arka plan izninin karşılığı; `rationale` iOS'ta kullanılmaz). Sonuç ana iş parçacığında döner.
+            Pushizo.Location.requestAlwaysPermission { granted in ok(["permission": granted]) }
+        // Arka plan bölge izleme (ADR-0065): varsayılan kapalı; Info.plist'e izin eklenmez.
+        case "setGeofencingEnabled":
+            guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            Pushizo.Location.setGeofencingEnabled(args["enabled"] as? Bool ?? false); ok()
+        case "isGeofencingEnabled": ok(["enabled": Pushizo.Location.isGeofencingEnabled])
+
+        // Android teslimat güçlendirme (ADR-0092) iOS'ta yoktur: durum "desteklenmiyor", diğerleri etkisiz false.
+        case "deliveryStatus": ok(["supported": false])
+        case "deliveryShouldShowGuidance": ok(["show": false])
+        case "deliveryOpenSettings", "deliveryShowGuidance": ok(["opened": false])
+
+        // Özellik bayrakları (ADR-0066): değerler yerel SDK önbelleğinden okunur.
+        case "featureFlagsRefresh":
+            Task {
+                let success = await Pushizo.FeatureFlags.refresh()
+                DispatchQueue.main.async { ok(["success": success]) }
+            }
+        case "featureFlagsIsEnabled":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            ok(["enabled": Pushizo.FeatureFlags.isEnabled(key, default: args["defaultValue"] as? Bool ?? false)])
+        case "featureFlagsGetValue":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            ok(["value": Self.orNull(Pushizo.FeatureFlags.value(key))])
+
+        // Gömülü yerleşimler (ADR-0068): anahtar ve limit denetimi yerel SDK'dadır (HSError.invalidArgument → INVALID_ARGUMENT).
+        case "placementsList":
+            guard let key = string("key") else { invalid("key gerekli"); return true }
+            let limit = (args["limit"] as? NSNumber)?.intValue ?? 1
+            inbox(reply) {
+                let messages = try await Pushizo.Placements.list(key, limit: limit)
+                self.rememberPlacements(messages)
+                return ["messages": messages.map { Self.map($0) }]
+            }
+        case "placementsReportImpression":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportImpression(message) }
+            ok()
+        case "placementsReportClick":
+            guard let id = string("id"), let buttonId = string("buttonId") else { invalid("id ve buttonId gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportClick(message, buttonId: buttonId) }
+            ok()
+        case "placementsReportDismiss":
+            guard let id = string("id") else { invalid("id gerekli"); return true }
+            if let message = placementMessage(id) { Pushizo.Placements.reportDismiss(message) }
+            ok()
 
         // Canlı sohbet (ADR-0040): kimlik, kuyruk, akış ve push yerel SDK'dadır.
         case "chatStart":
@@ -350,6 +494,15 @@ final class PushizoBridgeCore: NSObject {
             let download = args["download"] as? Bool ?? false
             inbox(reply) { ["url": try Pushizo.Chat.attachmentUrl(attachmentId, download: download).absoluteString] }
         case "chatGetVisitorId": ok(["visitorId": Self.orNull(Pushizo.Chat.visitorId)])
+        case "chatIsListening": ok(["listening": Pushizo.Chat.isListening])
+        // Hazır sohbet ekranı (`HSChatViewController`): etkin sahnenin en üstteki görünüm denetleyicisinden modal açılır.
+        case "chatShow":
+            guard Pushizo.isInitialized else { reply(.failure(code: "NOT_READY", message: Self.notInitialized)); return true }
+            Pushizo.Chat.show(); ok()
+        case "chatHide": Pushizo.Chat.hide(); ok()
+        // Sunum durumu UIKit'ten okunur: ana iş parçacığında (bekleyen `show`/`hide` işlendikten sonra) yanıtlanır.
+        case "chatIsPresented":
+            DispatchQueue.main.async { ok(["presented": Pushizo.Chat.isPresented]) }
 
         // Live Activities (ADR-0024): genel `PushizoDefaultLiveActivityAttributes` türü; değer doğrulaması yerel SDK'dadır.
         case "setupDefaultLiveActivity":
@@ -406,6 +559,29 @@ final class PushizoBridgeCore: NSObject {
 
     // MARK: Eşleme
 
+    /// Boş olmayan metin; değilse nil.
+    static func nonBlank(_ raw: Any?) -> String? {
+        guard let value = raw as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
+    }
+
+    /// Köprüden gelen düz nesne → metin sözlüğü (`null` değerler atlanır, sayı/boolean metne çevrilir).
+    static func stringMap(_ raw: Any?) -> [String: String] {
+        (raw as? [String: Any] ?? [:]).compactMapValues { value in
+            if value is NSNull { return nil }
+            return (value as? String) ?? "\(value)"
+        }
+    }
+
+    static func map(_ consent: HSUserConsent) -> [String: Any] {
+        [
+            "purpose": consent.purpose,
+            "granted": consent.granted,
+            "source": orNull(consent.source),
+            "updatedAt": millis(consent.updatedAt),
+        ]
+    }
+
     static func logLevel(_ name: String?) -> HSLog.Level {
         switch name {
         case "none": return HSLog.Level.none
@@ -450,8 +626,86 @@ final class PushizoBridgeCore: NSObject {
         ["preferences": r.preferences.map { map($0) }, "categories": r.categories.map { map($0) }]
     }
 
+    static func map(_ card: HSContentCard) -> [String: Any] {
+        ["id": card.id, "messageId": orNull(card.messageId), "type": card.type.rawValue, "title": orNull(card.title),
+         "body": orNull(card.body), "url": orNull(card.url), "imageUrl": orNull(card.imageUrl), "buttonText": orNull(card.buttonText),
+         "data": card.data, "pinned": card.pinned, "priority": card.priority, "viewed": card.viewed, "clicked": card.clicked,
+         "expiresAt": millis(card.expiresAt), "createdAt": millis(card.createdAt)]
+    }
+
+    static func map(_ feed: HSContentCardFeed) -> [String: Any] {
+        ["cards": feed.cards.map { map($0) }, "unviewedCount": feed.unviewedCount]
+    }
+
     static func map(_ page: HSInboxPage) -> [String: Any] {
         ["items": page.items.map { map($0) }, "unreadCount": page.unreadCount, "nextCursor": orNull(page.nextCursor), "hasMore": page.hasMore]
+    }
+
+    // In-app mesaj modeli → JS `InAppMessage` (alanlar yerel modelle aynı; zamanlar epoch milisaniye).
+    static func map(_ m: HSInAppMessage) -> [String: Any] {
+        ["id": m.id, "priority": m.priority,
+         "triggers": m.triggers.map { map($0) }, "triggerGroups": m.triggerGroups.map { group in group.map { map($0) } },
+         "variantId": orNull(m.variantId), "display": map(m.display),
+         "remainingImpressions": m.remainingImpressions, "minIntervalSeconds": m.minIntervalSeconds,
+         "stopAfterInteraction": m.stopAfterInteraction, "lastImpressionAt": millis(m.lastImpressionAt), "endAt": millis(m.endAt),
+         "language": orNull(m.language)]
+    }
+
+    static func map(_ d: HSInAppDisplay) -> [String: Any] {
+        ["layout": d.layout.rawValue, "backgroundColor": orNull(d.backgroundColor), "textColor": orNull(d.textColor),
+         "dismissible": d.dismissible, "autoDismissSeconds": orNull(d.autoDismissSeconds), "contentType": d.contentType.rawValue,
+         "blocks": d.blocks.map { map($0) }, "html": orNull(d.html), "htmlHeight": orNull(d.htmlHeight)]
+    }
+
+    static func map(_ t: HSInAppTrigger) -> [String: Any] {
+        switch t {
+        case .sessionStart: return ["kind": "session_start"]
+        case let .event(name): return ["kind": "event", "name": name]
+        case let .screen(name): return ["kind": "screen", "name": name]
+        case let .condition(key, op, value):
+            let raw: Any
+            switch value {
+            case .string(let s)?: raw = s
+            case .number(let n)?: raw = n
+            case nil: raw = NSNull()
+            }
+            return ["kind": "trigger", "key": key, "op": op, "value": raw]
+        case let .sessionDuration(seconds): return ["kind": "session_duration", "seconds": seconds]
+        case let .unsupported(kind): return ["kind": "unsupported", "name": kind]
+        }
+    }
+
+    static func map(_ a: HSInAppAction) -> [String: Any] {
+        switch a {
+        case .dismiss: return ["type": "dismiss"]
+        case let .url(url): return ["type": "url", "url": url]
+        case let .deeplink(url): return ["type": "deeplink", "url": url]
+        case let .tags(tags): return ["type": "tags", "tags": tags]
+        case .pushPrompt: return ["type": "push_prompt"]
+        case let .outcome(name, value): return ["type": "outcome", "name": name, "value": orNull(value)]
+        }
+    }
+
+    static func map(_ b: HSInAppButton) -> [String: Any] {
+        ["id": b.id, "text": b.text, "action": map(b.action), "backgroundColor": orNull(b.backgroundColor), "textColor": orNull(b.textColor)]
+    }
+
+    static func map(_ c: HSInAppCarouselCard) -> [String: Any] {
+        ["id": c.id, "title": c.title, "body": orNull(c.body), "imageUrl": orNull(c.imageUrl), "imageAlt": orNull(c.imageAlt),
+         "button": c.button.map { map($0) } ?? NSNull()]
+    }
+
+    static func map(_ block: HSInAppBlock) -> [String: Any] {
+        switch block {
+        case let .image(url, alt): return ["type": "image", "url": url, "alt": orNull(alt)]
+        case let .title(text): return ["type": "title", "text": text]
+        case let .body(text): return ["type": "body", "text": text]
+        case let .button(button):
+            var json = map(button)
+            json["type"] = "button"
+            return json
+        case let .carousel(carousel): return ["type": "carousel", "id": carousel.id, "cards": carousel.cards.map { map($0) }]
+        }
     }
 }
 

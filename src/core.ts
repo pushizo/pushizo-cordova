@@ -16,12 +16,21 @@ import type {
   ChatMessagePage,
   ChatMessagesOptions,
   ChatStartOptions,
+  FeatureFlagValue,
   ForegroundWillDisplayEvent,
   PushizoNotification,
   InAppClickEvent,
   InAppLifecycleEvent,
   InAppLifecycleListener,
+  InAppMessage,
   InAppTriggerValue,
+  ContentCard,
+  ContentCardEvent,
+  ContentCardFeed,
+  DeliveryGuidanceOptions,
+  DeliverySetting,
+  DeliveryStatus,
+  InboxChangeEvent,
   InboxItem,
   InboxListOptions,
   InboxPage,
@@ -31,12 +40,17 @@ import type {
   LoginOptions,
   NotificationClickEvent,
   PermissionChangeEvent,
+  PlacementListOptions,
   PreferenceChannel,
   PreferenceInput,
   PushSubscriptionState,
   RawForegroundEvent,
   RawInAppLifecycleEvent,
+  SendEventOptions,
+  UserConsent,
   UserPreferences,
+  UserProfile,
+  UserPropertyValue,
 } from './definitions';
 
 /** Native katmandan gelen olay adları. */
@@ -48,7 +62,9 @@ export type BridgeEventType =
   | 'inAppClick'
   | 'inAppLifecycle'
   | 'chatEvent'
-  | 'chatOpen';
+  | 'chatOpen'
+  | 'featureFlagsChange'
+  | 'inboxChange';
 
 /** Taşıma katmanı: native metot çağrısı ve olay aboneliği. */
 export interface Bridge {
@@ -61,6 +77,7 @@ type Listener<T> = (event: T) => void;
 
 const LOG_LEVELS: readonly LogLevel[] = ['none', 'error', 'warn', 'info', 'debug'];
 const LIFECYCLE_EVENTS = ['willDisplay', 'didDisplay', 'willDismiss', 'didDismiss'] as const;
+const INBOX_CHANGE_TYPES: readonly InboxChangeEvent['type'][] = ['listed', 'read', 'read_all', 'archived', 'count'];
 
 /** Dinleyici hatası diğer dinleyicileri ve native köprüyü etkilemez. */
 function safeInvoke<T>(listener: Listener<T>, event: T): void {
@@ -90,6 +107,41 @@ function stringRecord(input: Record<string, unknown>, name: string): Record<stri
     }
     out[key] = String(value);
   }
+  return out;
+}
+
+/** Kullanıcı özelliği anahtarı en çok bu kadar karakterdir (yerel iOS SDK kuralı; daha uzunu orada sessizce yok sayılır). */
+const MAX_PROPERTY_KEY_LENGTH = 64;
+
+function propertyKey(value: unknown): string {
+  const key = requireString(value, 'key').trim();
+  if (key.length > MAX_PROPERTY_KEY_LENGTH) {
+    throw new RangeError(`Pushizo: key en fazla ${MAX_PROPERTY_KEY_LENGTH} karakter olabilir.`);
+  }
+  return key;
+}
+
+/**
+ * `User.setProperty` değeri: metin, sonlu sayı, mantıksal ya da bunların dizisi/düz nesnesi. Yalnızca en üstteki
+ * `null`/`undefined` kabul edilir (özelliği siler); iç içe `null` yerel iOS SDK'da tüm yazmayı düşürdüğünden reddedilir.
+ */
+function propertyValue(value: unknown, name: string, nested = false): UserPropertyValue {
+  if (value === null || value === undefined) {
+    if (nested) throw new TypeError(`Pushizo: ${name} null olamaz.`);
+    return null;
+  }
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError(`Pushizo: ${name} sonlu bir sayı olmalı.`);
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item, i) => propertyValue(item, `${name}[${i}]`, true));
+  const proto: unknown = typeof value === 'object' ? Object.getPrototypeOf(value) : undefined;
+  if (typeof value !== 'object' || (proto !== Object.prototype && proto !== null)) {
+    throw new TypeError(`Pushizo: ${name} metin, sayı, mantıksal, dizi veya düz nesne olmalı.`);
+  }
+  const out: { [key: string]: UserPropertyValue } = {};
+  for (const [key, item] of Object.entries(value)) out[key] = propertyValue(item, `${name}.${key}`, true);
   return out;
 }
 
@@ -142,6 +194,15 @@ function liveActivityValues(input: unknown, name: string, reservedKey?: string):
   return out;
 }
 
+/** Yerleşim anahtarı: native SDK ve sunucu kuralı. */
+const PLACEMENT_KEY = /^[a-z][a-z0-9_.-]{0,63}$/;
+
+/** Rapor çağrılarında yalnızca mesaj kimliği köprüye gider; native katman mesajı son `list` yanıtlarından bulur. */
+function placementMessageId(message: Pick<InAppMessage, 'id'>): string {
+  if (message === null || typeof message !== 'object') throw new TypeError('Pushizo: message bir nesne olmalı.');
+  return requireString(message.id, 'message.id');
+}
+
 const PREFERENCE_CHANNELS: readonly PreferenceChannel[] = ['ios_push', 'android_push', 'web_push', 'email', 'sms'];
 
 /** Native tercih yanıtı (alanlar eksik gelebilir; `normalizePreferences` tamamlar). */
@@ -172,6 +233,43 @@ function preferenceArgs(input: PreferenceInput[]): PreferenceArg[] {
   });
 }
 
+/** `login` profilini doğrular; etiket değerleri metne çevrilir, boş alanlar köprüye gönderilmez. */
+function profileArgs(input: UserProfile): Record<string, unknown> {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('Pushizo: profile bir nesne olmalı.');
+  }
+  const out: Record<string, unknown> = {};
+  if (input.email !== undefined && input.email !== null) out.email = requireString(input.email, 'profile.email');
+  if (input.sms !== undefined && input.sms !== null) out.sms = requireString(input.sms, 'profile.sms');
+  if (input.tags !== undefined && input.tags !== null) {
+    const tags = stringRecord(input.tags, 'profile.tags');
+    if (Object.keys(tags).length > 0) out.tags = tags;
+  }
+  if (input.aliases !== undefined && input.aliases !== null) {
+    const aliases = stringRecord(input.aliases, 'profile.aliases');
+    if (Object.keys(aliases).length > 0) out.aliases = aliases;
+  }
+  return out;
+}
+
+/** Native rıza listesini eksik alanlara karşı normalize eder (`updatedAt` epoch milisaniye). */
+function normalizeConsents(raw: unknown): UserConsent[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UserConsent[] = [];
+  for (const item of raw as unknown[]) {
+    if (item === null || typeof item !== 'object') continue;
+    const c = item as Record<string, unknown>;
+    if (typeof c.purpose !== 'string' || c.purpose === '') continue;
+    out.push({
+      purpose: c.purpose,
+      granted: c.granted === true,
+      source: typeof c.source === 'string' ? c.source : null,
+      updatedAt: typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt) ? c.updatedAt : null,
+    });
+  }
+  return out;
+}
+
 function textMap(value: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return out;
@@ -187,6 +285,51 @@ function stringArray(value: unknown): string[] {
 }
 
 /** Native tercih yanıtını eksik alanlara karşı normalize eder (zamanlar epoch milisaniye). */
+const DELIVERY_SETTINGS: readonly DeliverySetting[] = ['auto', 'notifications', 'auto_start', 'battery_optimization', 'app_details'];
+
+function deliverySetting(value: unknown): DeliverySetting {
+  if (value === undefined || value === null) return 'auto';
+  if (!(DELIVERY_SETTINGS as readonly unknown[]).includes(value)) {
+    throw new TypeError(`Pushizo: setting ${DELIVERY_SETTINGS.join('|')} olmalı.`);
+  }
+  return value as DeliverySetting;
+}
+
+/** Native `deliveryStatus` yanıtı; desteklenmeyen platform yalnızca `supported` alanını döndürebilir. */
+type RawDeliveryStatus = Partial<DeliveryStatus> | undefined;
+
+/** Native teslim durumu; `supported` true değilse (iOS, web, başlatılmamış SDK) "desteklenmiyor / risk yok" durumu. */
+function normalizeDeliveryStatus(raw: RawDeliveryStatus): DeliveryStatus {
+  const m: Partial<Record<keyof DeliveryStatus, unknown>> = raw ?? {};
+  const supported = m.supported === true;
+  const text = (value: unknown, fallback: string): string => (supported && typeof value === 'string' ? value : fallback);
+  // Native SDK'nın ileride ekleyeceği, bu sürümün tanımadığı ekran atlanır.
+  const recommendedSettings = supported
+    ? stringArray(m.recommendedSettings).filter(
+        (s): s is DeliverySetting => s !== 'auto' && (DELIVERY_SETTINGS as readonly string[]).includes(s),
+      )
+    : [];
+  return {
+    supported,
+    manufacturer: text(m.manufacturer, ''),
+    brand: text(m.brand, ''),
+    vendor: text(m.vendor, 'other'),
+    aggressiveVendor: supported && m.aggressiveVendor === true,
+    rom: text(m.rom, ''),
+    romVersion: supported && typeof m.romVersion === 'string' ? m.romVersion : null,
+    notificationsEnabled: !supported || m.notificationsEnabled !== false,
+    channelBlocked: supported && m.channelBlocked === true,
+    batteryOptimizationExempt: !supported || m.batteryOptimizationExempt !== false,
+    backgroundRestricted: supported && m.backgroundRestricted === true,
+    standbyBucket: supported && typeof m.standbyBucket === 'string' ? m.standbyBucket : null,
+    powerSaveMode: supported && m.powerSaveMode === true,
+    dataSaverEnabled: supported && m.dataSaverEnabled === true,
+    restricted: supported && m.restricted === true,
+    risk: supported && (m.risk === 'high' || m.risk === 'elevated') ? m.risk : 'none',
+    recommendedSettings,
+  };
+}
+
 function normalizePreferences(raw: RawPreferences): UserPreferences {
   const preferences = Array.isArray(raw?.preferences) ? raw.preferences : [];
   const categories = Array.isArray(raw?.categories) ? raw.categories : [];
@@ -234,6 +377,8 @@ export class PushizoCore {
   private readonly permissionObservers = new Set<Listener<PermissionChangeEvent>>();
   private readonly inAppClickListeners = new Set<Listener<InAppClickEvent>>();
   private readonly inAppLifecycleListeners = new Set<InAppLifecycleListener>();
+  private readonly featureFlagObservers = new Set<() => void>();
+  private readonly inboxObservers = new Set<Listener<InboxChangeEvent>>();
   /** Dinleyici yokken gelen tıklamalar (soğuk başlatma); ilk dinleyiciye teslim edilir. */
   private readonly pendingClicks: NotificationClickEvent[] = [];
   /** Canlı sohbet dinleyicileri (tür başına). */
@@ -315,6 +460,22 @@ export class PushizoCore {
       case 'chatOpen':
         this.onChatOpen((payload ?? {}) as Record<string, unknown>);
         break;
+      case 'featureFlagsChange':
+        this.featureFlagObservers.forEach((l) => safeInvoke(l, undefined));
+        break;
+      case 'inboxChange': {
+        const raw = (payload ?? {}) as Record<string, unknown>;
+        const type = INBOX_CHANGE_TYPES.find((t) => t === raw.type);
+        if (!type) return;
+        const event: InboxChangeEvent = {
+          type,
+          unreadCount: typeof raw.unreadCount === 'number' && Number.isFinite(raw.unreadCount) ? raw.unreadCount : 0,
+        };
+        // `itemId` yalnızca tek öğe olaylarında (`read`, `archived`) bulunur; Android `null` gönderir, iOS alanı göndermez.
+        if (typeof raw.itemId === 'string' && raw.itemId !== '') event.itemId = raw.itemId;
+        this.inboxObservers.forEach((l) => safeInvoke(l, event));
+        break;
+      }
       default:
         break;
     }
@@ -401,6 +562,10 @@ export class PushizoCore {
     }
   }
 
+  /** Native SDK başlatıldı mı (`initialize` tamamlandı ya da süreç saklanan yapılandırmayla erkenden başlatıldı). */
+  isInitialized = async (): Promise<boolean> =>
+    Boolean((await this.bridge.call<{ initialized: boolean } | undefined>('isInitialized'))?.initialized);
+
   /** KVKK/GDPR onayı (`requiresPrivacyConsent: true` ile başlatıldıysa). */
   setConsentGiven(given: boolean): Promise<void> {
     return this.bridge.call('setConsentGiven', { given: Boolean(given) });
@@ -408,14 +573,17 @@ export class PushizoCore {
 
   /**
    * Anonim kullanıcıyı kimlikli kullanıcıya bağlar. Identity verification açıksa app moduna göre `identityHash`
-   * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`.
+   * (eski imza: ikinci argüman metin) ve/veya JWT gerekir: `login(id, { jwt })`. `profile` verilirse e-posta, SMS,
+   * etiket ve takma adlar aynı çağrıda ayarlanır: `login(id, { profile: { email: 'ali@ornek.com' } })`; geçersiz
+   * e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir (yarım kalmış kimlik değişimi olmaz).
    */
   login(externalId: string, proof?: string | LoginOptions): Promise<void> {
     requireString(externalId, 'externalId');
-    const { identityHash, jwt }: LoginOptions = typeof proof === 'string' ? { identityHash: proof } : (proof ?? {});
+    const { identityHash, jwt, profile }: LoginOptions = typeof proof === 'string' ? { identityHash: proof } : (proof ?? {});
     const args: Record<string, unknown> = { externalId };
     if (identityHash !== undefined && identityHash !== null) args.identityHash = requireString(identityHash, 'identityHash');
     if (jwt !== undefined && jwt !== null) args.jwt = requireString(jwt, 'jwt');
+    if (profile !== undefined && profile !== null) args.profile = profileArgs(profile);
     return this.bridge.call('login', args);
   }
 
@@ -442,6 +610,12 @@ export class PushizoCore {
     getTags: async (): Promise<Record<string, string>> =>
       (await this.bridge.call<{ tags: Record<string, string> }>('getTags')).tags ?? {},
     setLanguage: (code: string): Promise<void> => this.bridge.call('setLanguage', { code: requireString(code, 'code') }),
+    /**
+     * Kullanıcı özelliği yazar (ör. `setProperty('plan', 'pro')`); `null` özelliği siler. Değer metin, sayı, mantıksal ya da
+     * bunların dizisi/düz nesnesi olabilir; anahtar 1-64 karakterdir. Çevrimdışıyken yerel SDK kuyruğunda bekler.
+     */
+    setProperty: (key: string, value: UserPropertyValue): Promise<void> =>
+      this.bridge.call('setUserProperty', { key: propertyKey(key), value: propertyValue(value, 'value') }),
     addAlias: (label: string, id: string): Promise<void> =>
       this.bridge.call('addAliases', { aliases: { [requireString(label, 'label')]: requireString(id, 'id') } }),
     addAliases: (aliases: Record<string, string>): Promise<void> =>
@@ -470,6 +644,22 @@ export class PushizoCore {
     /** Tercihleri yazar (1-100 kayıt; `channel` verilmezse tüm kanallar); güncel listeyi döndürür. */
     setPreferences: async (preferences: PreferenceInput[]): Promise<UserPreferences> =>
       normalizePreferences(await this.bridge.call<RawPreferences>('setPreferences', { preferences: preferenceArgs(preferences) })),
+    /**
+     * Reklam kişiselleştirme rızası (ADR-0037): `true` iken kullanıcının e-posta/telefon özeti app'in bağladığı reklam
+     * platformu kitlelerine gönderilebilir; `false` rızayı geri alır. Güncel tercih listesini döndürür.
+     */
+    setAdsPersonalizationConsent: async (granted: boolean): Promise<UserPreferences> => {
+      if (typeof granted !== 'boolean') throw new TypeError('Pushizo: granted boolean olmalı.');
+      return normalizePreferences(await this.bridge.call<RawPreferences>('setAdsPersonalizationConsent', { granted }));
+    },
+    /** Rıza kayıtları (`ads_personalization` …). Abonelik henüz yoksa `NOT_READY` koduyla reddedilir. */
+    getConsents: async (): Promise<UserConsent[]> =>
+      normalizeConsents((await this.bridge.call<{ consents?: unknown } | undefined>('getConsents'))?.consents),
+    /**
+     * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). ADM kaydını kendisi yapan
+     * uygulamalar içindir. iOS ve web'de etkisizdir.
+     */
+    registerAdm: (token: string): Promise<void> => this.bridge.call('registerAdm', { token: requireString(token, 'token') }),
     pushSubscription: {
       getState: (): Promise<PushSubscriptionState> => this.bridge.call<PushSubscriptionState>('getPushSubscription'),
       getId: async (): Promise<string | null> =>
@@ -511,6 +701,28 @@ export class PushizoCore {
     /** Aynı gruptaki bildirimleri kaldırır (Android `android_group`, iOS `thread-id`). */
     removeGroupedNotifications: (group: string): Promise<void> =>
       this.bridge.call('removeGroupedNotifications', { group: requireString(group, 'group') }),
+    /**
+     * Uygulama rozetini ayarlar; rozet bu cihazda gösterilebiliyorsa true döner. iOS: rozet ve bildirim uzantısıyla
+     * paylaşılan sayaç ayarlanır (her zaman true). Android: başlatıcı rozeti için "sayıyı ayarla" API'si yoktur; yerel SDK
+     * sayıyı saklar ve sonraki bildirimlere yazar (Android 8 öncesinde, bildirimler ya da kanal rozeti kapalıyken false).
+     * Web: App Badging API (yüklü PWA); tarayıcı desteklemiyorsa false.
+     */
+    setBadgeCount: (count: number): Promise<boolean> => {
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+        throw new RangeError('Pushizo: count negatif olmayan tam sayı olmalı.');
+      }
+      return this.badge(count);
+    },
+    /** Rozeti sıfırlar (`setBadgeCount(0)`); sonuç `setBadgeCount` ile aynıdır. */
+    clearBadge: (): Promise<boolean> => this.badge(0),
+    /**
+     * Güncel rozet sayısı. Android: `setBadgeCount` ile saklanan son sayı; iOS: uygulama simgesindeki rozet; web: bu
+     * oturumda `setBadgeCount` ile başarıyla ayarlanan son sayı (tarayıcı rozeti okutmaz).
+     */
+    getBadgeCount: async (): Promise<number> => {
+      const count = (await this.bridge.call<{ count?: number } | undefined>('getBadgeCount'))?.count;
+      return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+    },
     /** Bildirim/düğme tıklaması; soğuk başlatmada bekleyen tıklama ilk dinleyiciye teslim edilir. */
     addClickListener: (cb: Listener<NotificationClickEvent>): (() => void) => {
       const remove = this.listen(this.clickListeners, cb);
@@ -542,15 +754,29 @@ export class PushizoCore {
     },
   };
 
+  /** Rozet çağrısı; yanıt vermeyen (eski) native katman başarılı sayılır. */
+  private async badge(count: number): Promise<boolean> {
+    return (await this.bridge.call<{ success?: boolean } | undefined>('setBadgeCount', { count }))?.success !== false;
+  }
+
   // --- Oturum / olaylar ---
 
   readonly Session = {
-    /** Özel olay / outcome; in-app olay tetiklerini de değerlendirir. */
-    sendEvent: (name: string, properties?: Record<string, unknown>, value?: number): Promise<void> => {
+    /**
+     * Özel olay / outcome; in-app olay tetiklerini de değerlendirir. `options.eventId` tekilleştirme kimliğidir
+     * (8-64 karakter; harf, rakam ve `. _ : -`): reklam pikseliyle aynı kimlik verilirse sunucu olayı tekilleşir
+     * (ADR-0038). Biçim geçersizse yerel SDK kendi kimliğini üretir.
+     */
+    sendEvent: (name: string, properties?: Record<string, unknown>, value?: number, options?: SendEventOptions): Promise<void> => {
       const args: Record<string, unknown> = { name: requireString(name, 'name'), properties: properties ?? {} };
       if (value !== undefined && value !== null) {
         if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('Pushizo: value sayı olmalı.');
         args.value = value;
+      }
+      const eventId = options?.eventId;
+      if (eventId !== undefined && eventId !== null) {
+        if (typeof eventId !== 'string') throw new TypeError('Pushizo: eventId metin olmalı.');
+        if (eventId !== '') args.eventId = eventId;
       }
       return this.bridge.call('sendEvent', args);
     },
@@ -607,13 +833,44 @@ export class PushizoCore {
     archive: (id: string): Promise<void> => this.bridge.call('inboxArchive', { id: requireString(id, 'id') }),
     unreadCount: async (): Promise<number> =>
       (await this.bridge.call<{ unreadCount: number }>('inboxUnreadCount')).unreadCount ?? 0,
+    /**
+     * Kutu değişim gözlemcisi (rozet güncellemek için): `read`/`read_all`/`archived` her işlemde, `listed`/`count`
+     * yalnızca okunmamış sayısı değiştiğinde bildirilir. Dönen fonksiyon aboneliği kaldırır.
+     */
+    addObserver: (cb: Listener<InboxChangeEvent>): (() => void) => this.listen(this.inboxObservers, cb),
+    removeObserver: (cb: Listener<InboxChangeEvent>): void => {
+      this.inboxObservers.delete(cb);
+    },
   };
+
+  // --- İçerik kartları (ADR-0082) ---
+
+  readonly ContentCards = {
+    /** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı; `limit` 1-100 (varsayılan 50). */
+    list: (limit = 50): Promise<ContentCardFeed> => {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        return Promise.reject(new RangeError('Pushizo: limit 1-100 olmalı.'));
+      }
+      return this.bridge.call<ContentCardFeed>('contentCardsList', { limit });
+    },
+    /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+    logImpression: (id: string): Promise<ContentCard> => this.cardEvent(id, 'impression'),
+    /** Karta tıklandı (gösterim de sayılır). */
+    logClick: (id: string): Promise<ContentCard> => this.cardEvent(id, 'click'),
+    /** Kart kapatıldı; akıştan kalkar. */
+    dismiss: (id: string): Promise<ContentCard> => this.cardEvent(id, 'dismiss'),
+  };
+
+  private cardEvent(id: string, event: ContentCardEvent): Promise<ContentCard> {
+    return this.bridge.call<ContentCard>('contentCardEvent', { id: requireString(id, 'id'), event });
+  }
 
   // --- Canlı sohbet (ADR-0040) ---
 
   /**
    * Canlı sohbet (Android ve iOS): ziyaretçi kimliği, çevrimdışı kuyruk, canlı akış (SSE + yoklama yedeği) ve push ile
-   * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir.
+   * gelen mesajlar native SDK'dadır; login/logout ve push aboneliği değişince bağlama native SDK'da yenilenir. Hazır
+   * arayüz için `show()` / `hide()`; kendi arayüzünüz için diğer çağrılar ve olaylar.
    */
   readonly Chat = {
     /** Sohbeti etkinleştirir ve ziyaretçiyi bağlar (giriş yapmış kullanıcı, push aboneliği); konuşma varsa döner. */
@@ -692,9 +949,26 @@ export class PushizoCore {
     /** Ek dosyasının adresi; ziyaretçi belirtecini taşır, yalnızca görsel bileşenine verin ve loglamayın. */
     attachmentUrl: async (attachmentId: string, download = false): Promise<string> =>
       (await this.bridge.call<{ url: string }>('chatAttachmentUrl', { attachmentId: requireString(attachmentId, 'attachmentId'), download })).url,
+    /** Canlı dinleme açık mı (`startListening` çağrıldı ve akış etkin). */
+    isListening: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ listening: boolean } | undefined>('chatIsListening'))?.listening),
     /** Bu cihazın ziyaretçi kimliği (sohbet henüz kullanılmadıysa null). */
     getVisitorId: async (): Promise<string | null> =>
       (await this.bridge.call<{ visitorId: string | null }>('chatGetVisitorId')).visitorId ?? null,
+    /**
+     * Hazır sohbet ekranını açar (Android `HsChatActivity`, iOS `HSChatViewController` modal; web: Web SDK sohbet
+     * widget'ı açık pencereyle). Ekran zaten açıksa yenisi açılmaz. `initialize` öncesinde `NOT_READY` ile reddedilir.
+     */
+    show: async (): Promise<void> => {
+      await this.bridge.call('chatShow');
+    },
+    /** `show` ile açılan sohbet ekranını kapatır (açık değilse hiçbir şey yapmaz). */
+    hide: async (): Promise<void> => {
+      await this.bridge.call('chatHide');
+    },
+    /** `show` ile açılan sohbet ekranı şu an açık mı. */
+    isPresented: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ presented: boolean } | undefined>('chatIsPresented'))?.presented),
     /** Sohbet olay dinleyicisi; kaldırma fonksiyonu döner. `open`: sohbet bildirimine tıklama. */
     addEventListener: <K extends keyof ChatEventMap>(event: K, listener: Listener<ChatEventMap[K]>): (() => void) => {
       const set = this.chatListeners[event] as Set<Listener<ChatEventMap[K]>> | undefined;
@@ -757,14 +1031,71 @@ export class PushizoCore {
     this.chatListeners.open.forEach((l) => safeInvoke(l, event));
   }
 
+  // --- Özellik bayrakları (ADR-0066) ---
+
+  /**
+   * Özellik bayrakları: değerler native SDK'da oturum başında yenilenir ve cihazda saklanır; ağ yoksa son değer, hiç
+   * alınmadıysa verilen varsayılan döner. Gizlilik onayı beklenirken istek gönderilmez.
+   */
+  readonly FeatureFlags = {
+    /** Değerleri sunucudan hemen yeniler; yeni değerler alındıysa true (hata son değerleri korur). */
+    refresh: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ success: boolean } | undefined>('featureFlagsRefresh'))?.success),
+    /** Bayrak bu kullanıcı için açık mı; değer henüz yoksa `defaultValue`. */
+    isEnabled: async (key: string, defaultValue = false): Promise<boolean> => {
+      const args = { key: requireString(key, 'key'), defaultValue: Boolean(defaultValue) };
+      return Boolean((await this.bridge.call<{ enabled: boolean } | undefined>('featureFlagsIsEnabled', args))?.enabled);
+    },
+    /** Bayrağın değeri (metin, sayı, mantıksal, nesne veya dizi); değer yoksa `defaultValue`. */
+    getValue: async <T extends FeatureFlagValue = FeatureFlagValue>(key: string, defaultValue: T | null = null): Promise<T | null> => {
+      const result = await this.bridge.call<{ value?: FeatureFlagValue } | undefined>('featureFlagsGetValue', {
+        key: requireString(key, 'key'),
+      });
+      const value = result?.value;
+      return value === undefined || value === null ? defaultValue : (value as T);
+    },
+    /**
+     * Bayrak değerleri sunucudan her yenilendiğinde (oturum başı ve `refresh()`) çağrılır; güncel değerler `isEnabled` /
+     * `getValue` ile okunur. Dönen fonksiyon aboneliği kaldırır.
+     */
+    addObserver: (cb: () => void): (() => void) => this.listen(this.featureFlagObservers, cb),
+    removeObserver: (cb: () => void): void => {
+      this.featureFlagObservers.delete(cb);
+    },
+  };
+
+  // --- Gömülü yerleşimler (ADR-0068) ---
+
+  /**
+   * Gömülü yerleşimler: uygulamanın ayırdığı alana içerik. Model döner, çizim uygulamanındır; içerik ekrana gelince
+   * `reportImpression`, düğme tıklanınca `reportClick`, kapatılınca `reportDismiss` çağrılır.
+   */
+  readonly Placements = {
+    /** Alanın içeriği (`limit` 1-10, varsayılan 1). Abonelik yoksa veya gizlilik onayı bekleniyorsa boş döner. */
+    list: async (key: string, options: PlacementListOptions = {}): Promise<InAppMessage[]> => {
+      if (typeof key !== 'string' || !PLACEMENT_KEY.test(key)) throw new TypeError('Pushizo: geçersiz yerleşim anahtarı.');
+      const limit = options.limit ?? 1;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new RangeError('Pushizo: limit 1-10 olmalı.');
+      const result = await this.bridge.call<{ messages?: InAppMessage[] } | undefined>('placementsList', { key, limit });
+      return Array.isArray(result?.messages) ? result.messages : [];
+    },
+    /** Raporlar `list` ile alınmış mesaj içindir; native katmanın tanımadığı mesaj yok sayılır. */
+    reportImpression: async (message: Pick<InAppMessage, 'id'>): Promise<void> =>
+      this.bridge.call('placementsReportImpression', { id: placementMessageId(message) }),
+    reportClick: async (message: Pick<InAppMessage, 'id'>, buttonId: string): Promise<void> =>
+      this.bridge.call('placementsReportClick', { id: placementMessageId(message), buttonId: requireString(buttonId, 'buttonId') }),
+    reportDismiss: async (message: Pick<InAppMessage, 'id'>): Promise<void> =>
+      this.bridge.call('placementsReportDismiss', { id: placementMessageId(message) }),
+  };
+
   // --- Konum (v2 Faz 17b) ---
 
   /**
-   * Konum paylaşımı (yalnızca ön plan; arka plan konumu yok). Paylaşım açıkken native SDK konumu oturum başında ve
-   * uygulama ön plana döndüğünde en sık 5 dakikada bir push aboneliğine yazar; izin yoksa veya gizlilik onayı
-   * verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık rıza kaydı sayılır; `setShared(false)` konumu ve
-   * rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde `setShared`/`requestPermission` `NOT_READY` ile
-   * reddedilir (web: Web SDK hatası).
+   * Konum paylaşımı (yalnızca ön plan; arka planda koordinat toplanmaz, bölge izleme için `setGeofencingEnabled`).
+   * Paylaşım açıkken native SDK konumu oturum başında ve uygulama ön plana döndüğünde en sık 5 dakikada bir push
+   * aboneliğine yazar; izin yoksa veya gizlilik onayı verilmemişse hiçbir şey gönderilmez. İlk konum sunucuda KVKK açık
+   * rıza kaydı sayılır; `setShared(false)` konumu ve rıza kaydını sildirir. Tercih kalıcıdır. `initialize` öncesinde
+   * `setShared`/`requestPermission`/`setGeofencingEnabled` `NOT_READY` ile reddedilir (web: Web SDK hatası).
    */
   readonly Location = {
     /** Paylaşımı açar/kapatır (kalıcı). Açılırken izin varsa konum hemen gönderilir; izin için `requestPermission`. */
@@ -787,6 +1118,106 @@ export class PushizoCore {
       const args: Record<string, unknown> = {};
       if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
       return Boolean((await this.bridge.call<{ permission: boolean }>('requestLocationPermission', args)).permission);
+    },
+    /**
+     * Ön plan konum izni verilmiş mi (Android yaklaşık/hassas, iOS "kullanırken" veya "her zaman"; web: tarayıcı konum
+     * izninin son bilinen durumu). İstem açmaz.
+     */
+    permissionGranted: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ permission: boolean } | undefined>('getLocationPermission'))?.permission),
+    /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman"). Web'de false. */
+    backgroundPermissionGranted: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ background: boolean } | undefined>('getLocationPermission'))?.background),
+    /**
+     * Arka plan konum iznini ister (bölge izleme için). Android: açıklama diyaloğu (`rationale`; verilmezse SDK metni),
+     * ardından `ACCESS_BACKGROUND_LOCATION` (Android 11+ sistem Ayarlar ekranını açar; önce ön plan konum izni verilmiş
+     * olmalı). iOS: "her zaman" izni (`rationale` yok sayılır; önce "kullanırken" izni verilmiş olmalı). Sonuç: izin
+     * varsa veya verildiyse true; reddedildiyse, uygulama izni tanımlamadıysa veya vazgeçildiyse false. Web'de false.
+     */
+    requestBackgroundPermission: async (rationale?: string): Promise<boolean> => {
+      if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+        throw new TypeError('Pushizo: rationale metin olmalı.');
+      }
+      const args: Record<string, unknown> = {};
+      if (typeof rationale === 'string' && rationale.trim() !== '') args.rationale = rationale;
+      const result = await this.bridge.call<{ permission: boolean } | undefined>('requestBackgroundLocationPermission', args);
+      return Boolean(result?.permission);
+    },
+    /** `requestBackgroundPermission` ile aynı izin (iOS adı: "her zaman"); iki ad da her platformda çalışır. */
+    requestAlwaysPermission: async (): Promise<boolean> =>
+      Boolean(
+        (await this.bridge.call<{ permission: boolean } | undefined>('requestBackgroundLocationPermission', {}))?.permission,
+      ),
+    /**
+     * Arka plan bölge izlemeyi açar/kapatır (ADR-0065; kalıcı, varsayılan kapalı). İzlemeyi işletim sistemi yapar,
+     * sunucuya koordinat gitmez. `setShared(true)` ve arka plan konum izni gerekir (`requestBackgroundPermission`);
+     * köprü manifest/Info.plist'e izin eklemez.
+     */
+    setGeofencingEnabled: (enabled: boolean): Promise<void> =>
+      this.bridge.call('setGeofencingEnabled', { enabled: Boolean(enabled) }),
+    /** Bölge izleme açık mı (kalıcı tercih; izin durumundan bağımsız). */
+    isGeofencingEnabled: async (): Promise<boolean> =>
+      Boolean((await this.bridge.call<{ enabled: boolean } | undefined>('isGeofencingEnabled'))?.enabled),
+  };
+
+  // --- Reklam kimliği (ADR-0037) ---
+
+  /**
+   * Mobil reklam kimliği (Android GAID, iOS IDFA). SDK reklam kitaplığı ve izin istemi içermez: kimliği uygulama alır
+   * (Android `AdvertisingIdClient`, iOS App Tracking Transparency izninden sonra `ASIdentifierManager`) ve buraya verir.
+   * Kimlik reklam kitlesine yalnızca `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle gider.
+   */
+  readonly Ads = {
+    /** Reklam kimliğini yazar; `null` veya sıfır kimlik sunucudaki kaydı siler. Web'de etkisizdir. */
+    setAdvertisingId: (id: string | null): Promise<void> => {
+      if (id !== null && id !== undefined && typeof id !== 'string') {
+        throw new TypeError('Pushizo: id metin veya null olmalı.');
+      }
+      return this.bridge.call('setAdvertisingId', { id: typeof id === 'string' && id.trim() !== '' ? id : null });
+    },
+  };
+
+  // --- Android teslimat güçlendirme (ADR-0092) ---
+
+  /**
+   * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu
+   * için bildirimler gecikir ya da gelmez. Bu yüzey cihazdaki kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+   * Yalnızca Android'de etkilidir: iOS ve web'de `status()` `supported: false` ve `risk: 'none'` döner, `openSettings` ile
+   * `showGuidance` hiçbir şey yapmadan `false` döner.
+   */
+  readonly Delivery = {
+    /** Cihazın teslim durumu: üretici, ROM, pil muafiyeti, arka plan kısıtı, risk ve önerilen ayar ekranları. */
+    status: async (): Promise<DeliveryStatus> =>
+      normalizeDeliveryStatus(await this.bridge.call<RawDeliveryStatus>('deliveryStatus')),
+    /** Hazır açıklama diyaloğu şimdi gösterilmeli mi: teslim riski var ve diyalog son `minIntervalDays` günde gösterilmedi. */
+    shouldShowGuidance: async (minIntervalDays = 14): Promise<boolean> => {
+      if (!Number.isInteger(minIntervalDays) || minIntervalDays < 0) {
+        throw new RangeError('Pushizo: minIntervalDays negatif olmayan tam sayı olmalı.');
+      }
+      const result = await this.bridge.call<{ show: boolean } | undefined>('deliveryShouldShowGuidance', { minIntervalDays });
+      return Boolean(result?.show);
+    },
+    /**
+     * Ayar ekranını açar (`auto`: duruma en uygun ekran). Üreticiye özgü ekran bulunamazsa standart Android ekranına
+     * düşülür. Bir ekran açıldıysa true.
+     */
+    openSettings: async (setting: DeliverySetting = 'auto'): Promise<boolean> => {
+      const args = { setting: deliverySetting(setting) };
+      return Boolean((await this.bridge.call<{ opened: boolean } | undefined>('deliveryOpenSettings', args))?.opened);
+    },
+    /**
+     * Hazır açıklama diyaloğunu gösterir (22 dil; `message` verilirse SDK metni yerine o gösterilir). Kullanıcı kabul
+     * ederse `setting` ekranı açılır. Ayar ekranı açıldıysa true; kullanıcı vazgeçtiyse, ekran açılamadıysa ya da etkin
+     * Activity yoksa false. SDK diyaloğu kendiliğinden göstermez; uygun anı uygulama seçer (`shouldShowGuidance`).
+     */
+    showGuidance: async (options: DeliveryGuidanceOptions = {}): Promise<boolean> => {
+      const message = options.message;
+      if (message !== undefined && message !== null && typeof message !== 'string') {
+        throw new TypeError('Pushizo: message metin olmalı.');
+      }
+      const args: Record<string, unknown> = { setting: deliverySetting(options.setting) };
+      if (typeof message === 'string' && message.trim() !== '') args.message = message;
+      return Boolean((await this.bridge.call<{ opened: boolean } | undefined>('deliveryShowGuidance', args))?.opened);
     },
   };
 

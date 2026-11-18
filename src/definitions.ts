@@ -21,6 +21,17 @@ export interface LoginOptions {
   identityHash?: string;
   /** SDK isteklerinde `Authorization: Bearer` başlığıyla gider; süresi dolunca `updateUserJwt` ile yenilenir. */
   jwt?: string;
+  /** Girişle birlikte ayarlanan profil; geçersiz e-posta veya telefon girişten önce `INVALID_ARGUMENT` ile reddedilir. */
+  profile?: UserProfile;
+}
+
+/** `Pushizo.login` ile tek çağrıda ayarlanan profil alanları (native `HsUserProfile`). */
+export interface UserProfile {
+  email?: string;
+  /** E.164 biçiminde telefon numarası. */
+  sms?: string;
+  tags?: Record<string, InAppTriggerValue>;
+  aliases?: Record<string, string>;
 }
 
 /** Bildirim içeriği (native `HsNotification` / `HSNotification`). */
@@ -107,6 +118,46 @@ export interface InboxPage {
   hasMore: boolean;
 }
 
+/** İçerik kartı türü (ADR-0082). */
+export type ContentCardType = 'classic' | 'captioned_image' | 'image_only';
+
+/** İçerik kartı; zamanlar epoch milisaniyedir. Akış sabitlenmiş → öncelik → yeni sırasıyla gelir. */
+export interface ContentCard {
+  id: string;
+  messageId: string | null;
+  type: ContentCardType;
+  title: string | null;
+  body: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  buttonText: string | null;
+  data: Record<string, string>;
+  pinned: boolean;
+  priority: number;
+  viewed: boolean;
+  clicked: boolean;
+  expiresAt: number | null;
+  createdAt: number | null;
+}
+
+export interface ContentCardFeed {
+  cards: ContentCard[];
+  unviewedCount: number;
+}
+
+/** Kart olayı: gösterim, tıklama veya kapatma. */
+export type ContentCardEvent = 'impression' | 'click' | 'dismiss';
+
+/**
+ * `Inbox.addObserver` olayı (yerel `HsInboxChangeEvent` / `HSInboxChangeEvent`, Web SDK `InboxChangeEvent`).
+ * `itemId` yalnızca tek öğe olaylarında (`read`, `archived`) bulunur; `unreadCount` güncel okunmamış sayısıdır.
+ */
+export interface InboxChangeEvent {
+  type: 'listed' | 'read' | 'read_all' | 'archived' | 'count';
+  itemId?: string;
+  unreadCount: number;
+}
+
 export interface InboxListOptions {
   /** 1-200 (varsayılan 50). */
   limit?: number;
@@ -146,6 +197,16 @@ export interface UserPreferences {
   categories: PreferenceCategory[];
 }
 
+/** Rıza kaydı (`User.getConsents`; ADR-0037): `ads_personalization` gibi ayrılmış amaç anahtarları. */
+export interface UserConsent {
+  purpose: string;
+  granted: boolean;
+  /** Kaydı yazan taraf (`sdk`, `api`, `dashboard` …); kayıt yoksa null. */
+  source: string | null;
+  /** Epoch milisaniye; kayıt yoksa null. */
+  updatedAt: number | null;
+}
+
 /** `User.setPreferences` girdisi; `channel` verilmezse veya null ise tüm kanallar. */
 export interface PreferenceInput {
   category: string;
@@ -154,6 +215,18 @@ export interface PreferenceInput {
 }
 
 export type InAppTriggerValue = string | number | boolean;
+
+/**
+ * `User.setProperty` değeri: metin, sonlu sayı, mantıksal ya da bunların dizisi/düz nesnesi. En üstteki `null` özelliği
+ * siler; iç içe `null` kabul edilmez.
+ */
+export type UserPropertyValue = string | number | boolean | null | UserPropertyValue[] | { [key: string]: UserPropertyValue };
+
+/** `Session.sendEvent` seçenekleri. */
+export interface SendEventOptions {
+  /** Tekilleştirme kimliği: 8-64 karakter; harf, rakam ve `. _ : -`. Biçim geçersizse yerel SDK kendi kimliğini üretir. */
+  eventId?: string;
+}
 
 /**
  * iOS Live Activity alan değeri (`PushizoDefaultLiveActivityAttributes.data` / `ContentState.data`): metin, sonlu
@@ -173,6 +246,163 @@ export interface RawForegroundEvent {
 export interface RawInAppLifecycleEvent {
   event: InAppLifecycleEventName;
   message: { id: string };
+}
+
+// --- Özellik bayrakları (ADR-0066) ---
+
+/** Özellik bayrağı değeri: metin, sayı, mantıksal, nesne veya dizi (JSON). */
+export type FeatureFlagValue = string | number | boolean | null | FeatureFlagValue[] | { [key: string]: FeatureFlagValue };
+
+// --- Gömülü yerleşimler (ADR-0068) ---
+
+/**
+ * In-app mesaj tetik koşulu. `trigger`: `InAppMessages.addTrigger` değeri (`op`: eq | neq | exists | gt | lt).
+ * `unsupported`: bu SDK sürümünün tanımadığı tür (`name` sunucudaki tür adı).
+ */
+export type InAppTrigger =
+  | { kind: 'session_start' }
+  | { kind: 'event'; name: string }
+  | { kind: 'screen'; name: string }
+  | { kind: 'trigger'; key: string; op: string; value: string | number | null }
+  | { kind: 'session_duration'; seconds: number }
+  | { kind: 'unsupported'; name: string };
+
+/** Düğme aksiyonu; `url` http/https adresi, `deeplink` uygulama şemasıdır. */
+export type InAppAction =
+  | { type: 'dismiss' }
+  | { type: 'url'; url: string }
+  | { type: 'deeplink'; url: string }
+  | { type: 'tags'; tags: Record<string, string> }
+  | { type: 'push_prompt' }
+  | { type: 'outcome'; name: string; value: number | null };
+
+export interface InAppButton {
+  id: string;
+  text: string;
+  action: InAppAction;
+  backgroundColor: string | null;
+  textColor: string | null;
+}
+
+/** Carousel kartı; `button` geçersiz aksiyonluysa null. */
+export interface InAppCarouselCard {
+  id: string;
+  title: string;
+  body: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  button: InAppButton | null;
+}
+
+/** Mesaj içerik bloğu; metinler sunucuda kullanıcının dilinde çözülmüştür. */
+export type InAppBlock =
+  | { type: 'image'; url: string; alt: string | null }
+  | { type: 'title'; text: string }
+  | { type: 'body'; text: string }
+  | ({ type: 'button' } & InAppButton)
+  | { type: 'carousel'; id: string; cards: InAppCarouselCard[] };
+
+export type InAppLayout = 'modal' | 'banner_top' | 'banner_bottom' | 'fullscreen';
+
+export interface InAppDisplay {
+  layout: InAppLayout;
+  backgroundColor: string | null;
+  textColor: string | null;
+  dismissible: boolean;
+  autoDismissSeconds: number | null;
+  /** `html` ise `blocks` boştur ve içerik `html` alanındadır. */
+  contentType: 'blocks' | 'html';
+  blocks: InAppBlock[];
+  html: string | null;
+  htmlHeight: number | null;
+}
+
+/**
+ * In-app mesaj modeli (native `HsInAppMessage` / `HSInAppMessage` alanları); `Placements.list` bu modeli döndürür.
+ * Zamanlar epoch milisaniyedir.
+ */
+export interface InAppMessage {
+  id: string;
+  priority: number;
+  /** İlk tetik grubu (geriye uyum). */
+  triggers: InAppTrigger[];
+  /** Gruplar VEYA, grup içi VE ile bağlıdır. */
+  triggerGroups: InAppTrigger[][];
+  /** Sunucunun seçtiği A/B görünüm varyantı. */
+  variantId: string | null;
+  display: InAppDisplay;
+  remainingImpressions: number;
+  minIntervalSeconds: number;
+  stopAfterInteraction: boolean;
+  lastImpressionAt: number | null;
+  endAt: number | null;
+  /** Sunucunun içeriği çözdüğü dil; web'de null. */
+  language: string | null;
+}
+
+export interface PlacementListOptions {
+  /** 1-10 (varsayılan 1). */
+  limit?: number;
+}
+
+// --- Android teslimat güçlendirme (ADR-0092) ---
+
+/** Bildirim teslim riski (native Android `HsDeliveryRisk`). */
+export type DeliveryRisk = 'none' | 'elevated' | 'high';
+
+/**
+ * `Pushizo.Delivery.openSettings` / `showGuidance` ile açılabilen Android ayar ekranı: `auto` duruma en uygun ekran,
+ * `notifications` bildirim ayarları, `auto_start` üreticinin otomatik başlatma yöneticisi, `battery_optimization` pil
+ * optimizasyonu, `app_details` uygulama ayrıntıları.
+ */
+export type DeliverySetting = 'auto' | 'notifications' | 'auto_start' | 'battery_optimization' | 'app_details';
+
+/**
+ * Cihazın bildirim teslim durumu (`Pushizo.Delivery.status()`; native Android `HsDeliveryStatus`). Kişisel veri içermez.
+ * Yalnızca Android'de doludur: iOS'ta, web'de ve Android'de SDK başlatılmadan önce `supported` `false`, `risk` `none` ve
+ * `recommendedSettings` boştur.
+ */
+export interface DeliveryStatus {
+  /** Teşhis bu platformda okunabildi mi. */
+  supported: boolean;
+  /** `Build.MANUFACTURER` (küçük harf). */
+  manufacturer: string;
+  /** `Build.BRAND` (küçük harf). */
+  brand: string;
+  /** Üretici ailesi: `xiaomi`, `huawei`, `honor`, `oppo`, `realme`, `oneplus`, `vivo`, `samsung`, `meizu`, `asus`, `transsion`, `other`. */
+  vendor: string;
+  /** Üreticinin kendi pil/otomatik başlatma yöneticisi arka plandaki uygulamaları durdurabiliyor mu. */
+  aggressiveVendor: boolean;
+  /** ROM kimliği: `miui`, `hyperos`, `emui`, `harmonyos`, `magicos`, `coloros`, `oxygenos`, `realmeui`, `funtouchos`, `originos`, `oneui`, `flyme`, `android`. */
+  rom: string;
+  romVersion: string | null;
+  /** Bildirim izni verilmiş ve bildirimler açık mı. */
+  notificationsEnabled: boolean;
+  /** Varsayılan bildirim kanalı kullanıcı tarafından kapatılmış mı. */
+  channelBlocked: boolean;
+  /** Uygulama pil optimizasyonundan muaf mı. */
+  batteryOptimizationExempt: boolean;
+  /** Kullanıcı arka plan etkinliğini kısıtlamış mı. */
+  backgroundRestricted: boolean;
+  /** Bekleme kovası: `exempted`, `active`, `working_set`, `frequent`, `rare`, `restricted` (okunamadıysa null). */
+  standbyBucket: string | null;
+  /** Pil tasarrufu kipi açık mı. */
+  powerSaveMode: boolean;
+  /** Veri tasarrufu uygulamanın arka plan verisini engelliyor mu. */
+  dataSaverEnabled: boolean;
+  /** Sistem arka plan kısıtı: kullanıcı kısıtlamış ya da uygulama `rare`/`restricted` kovasında. */
+  restricted: boolean;
+  risk: DeliveryRisk;
+  /** Kullanıcının açması önerilen ayar ekranları (önem sırasıyla; öneri yoksa boş). */
+  recommendedSettings: DeliverySetting[];
+}
+
+/** `Pushizo.Delivery.showGuidance` seçenekleri. */
+export interface DeliveryGuidanceOptions {
+  /** Kullanıcı kabul edince açılacak ekran (varsayılan `auto`). */
+  setting?: DeliverySetting;
+  /** SDK'nın yerelleştirilmiş metni yerine gösterilecek açıklama. */
+  message?: string;
 }
 
 // --- Canlı sohbet (ADR-0040) ---

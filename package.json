@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-pushizo",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Pushizo Cordova eklentisi: push bildirimi, kullanıcı/tag, e-posta/SMS, in-app mesaj ve bildirim kutusu (Android + iOS)",
   "license": "MIT",
   "author": "Pushizo <bildirim@pushizo.com>",
